@@ -1,53 +1,15 @@
-import time
 
-start_time = time.time()
 import os
-print(f"os imported in {time.time() - start_time:.4f} seconds")
-
-start_time = time.time()
 import re
-print(f"re imported in {time.time() - start_time:.4f} seconds")
-
-start_time = time.time()
 import streamlit as st
-print(f"streamlit imported in {time.time() - start_time:.4f} seconds")
-
-start_time = time.time()
 from pathlib import Path
-print(f"pathlib imported in {time.time() - start_time:.4f} seconds")
-
-start_time = time.time()
 import pipeline
-print(f"pipeline imported in {time.time() - start_time:.4f} seconds")
-
-start_time = time.time()
 from LED_extraction import extract_LED_energy
-print(f"LED_extraction imported in {time.time() - start_time:.4f} seconds")
-
-start_time = time.time()
 from csv_to_viz import extrakt
-print(f"csv_to_viz imported in {time.time() - start_time:.4f} seconds")
-
-start_time = time.time()
-import subprocess
-print(f"subprocess imported in {time.time() - start_time:.4f} seconds")
-
-start_time = time.time()
 from visualization import MoleculeVisualizer
-print(f"visualization imported in {time.time() - start_time:.4f} seconds")
-
-start_time = time.time()
 from config_manager import FragmentConfig
-print(f"config_manager imported in {time.time() - start_time:.4f} seconds")
-
-start_time = time.time()
 import logging
-print(f"logging imported in {time.time() - start_time:.4f} seconds")
-
-start_time = time.time()
 from logging.handlers import RotatingFileHandler
-print(f"RotatingFileHandler imported in {time.time() - start_time:.4f} seconds")
-
 from database import Database
 
 topics_progress_b, total_files_b, completed_files_b, pending_jobs_b = {}, 0, 0, []
@@ -132,13 +94,10 @@ def upload_file_and_start_calculation():
             else:
                 file_paths.append(handle_file_upload(f))
             
-            print(file_paths)
         visualize_xyz(file_paths)
 
     fragment_input = st.text_input("Fragmentierungsangabe", value=default_fragment)
     header_input = st.text_area("Zusätzliche Header-Einstellungen für die .inp-Datei (optional)", """! DLPNO-CCSD(T) def2-svp def2-svp/C DEF2/J RIJCOSX tightSCF normalPNO LED
-
-%mdci DoDIDplot true end
 
 %maxcore 160000
 
@@ -151,14 +110,8 @@ end""")
                 file = file_paths[i]
                 config.save_fragment(file.name, fragment_input)
                 st.info("Die Berechnung wurde in auftrag gegeben...")
-                paths, base, frag_len, index_compound = pipeline.ORCAInputFileCreator(str(file_paths[i]), fragment_input, header_input).create_inp_files()
-                if fragment_input == "-1":
-                    ret = pipeline.ShellScriptCreator.sh_script_erstellen(paths, base, frag_len, index_compound, time="2:00:00", mem=20, main=False)
-                else:
-                    ret = pipeline.ShellScriptCreator.sh_script_erstellen(paths, base, frag_len, index_compound)
+                pipeline.ORCAInputFileCreator(str(file_paths[i]), fragment_input, header_input).create_inp_files()
                 st.info("Die Berechnung wurde vorbereitet.")
-                for r in ret:
-                    Database.process_candidate(Path(r).parent)
         else:
             st.error("Bitte wählen Sie eine Datei aus.")
 

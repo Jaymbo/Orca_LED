@@ -96,22 +96,28 @@ end"""
 
         if self.fragments != "-1":
             fragment_lines = self.handle_fragments()
+        else:
+            fragment_lines = None
 
         xyz_files = sorted(glob.glob(os.path.join(self.xyz_folder, "*.xyz")))
         if not xyz_files:
             print("Keine .xyz-Dateien im angegebenen Ordner gefunden.")
             return
 
-        inp_paths = []
         ind = 0
         for i, xyz_file_i in enumerate(xyz_files):
             sum_atoms = min(len(open(self.file).read().split("\n")) - 2, 48) if os.path.basename(self.xyz_file).split(".")[0] == os.path.basename(xyz_file_i).split(".")[0] else None
             if sum_atoms:
                 self.frag_len = self.frag_len[:i] + [sum_atoms] + self.frag_len[i:]
                 ind = i
-            inp_paths.append(self.create_single_inp_file(xyz_file_i, self.frag_len, i, fragment_lines))
-
-        return inp_paths, os.path.dirname(self.xyz_file), self.frag_len, ind
+            self.create_single_inp_file(xyz_file_i, Path(xyz_file_i).parent, self.frag_len, i, fragment_lines)
+            path = Database.process_candidate(Path(xyz_file_i.split(".")[0]))
+            if path is not None:
+                self.create_single_inp_file(path, Path(path).parents[1], self.frag_len, i, fragment_lines)
+                if self.fragments != "-1":
+                    ShellScriptCreator.single_sh_script_erstellen(path, Path(path).parents[1], i, self.frag_len, ind, time="2:00:00", mem=20, main=False)
+                else:
+                    ShellScriptCreator.single_sh_script_erstellen(path, Path(path).parents[1], i, self.frag_len, ind)
 
     def handle_fragments(self):
         if self.fragments is None or self.fragments == "":
@@ -147,16 +153,15 @@ end"""
         fragment_lines.append(" end\nend\n")
         return fragment_lines
 
-    def create_single_inp_file(self, xyz_file_i, frag_len, i, fragment_lines):
+    def create_single_inp_file(self, xyz_file_i, base, frag_len, i, fragment_lines):
         base_name = os.path.splitext(os.path.basename(xyz_file_i))[0]
         charge = ChargeCalculator.calculate_charge(
             self.file if os.path.basename(self.xyz_file).split(".")[0] == os.path.basename(xyz_file_i).split(".")[0] else xyz_file_i
         )
-        Database.process_candidate(Path(str(xyz_file_i.parent) + "/" + xyz_file_i.stem))
         inp_content = self.create_inp_file_content(charge, frag_len[i], xyz_file_i, fragment_lines if self.fragments != "-1" else None)
 
-        os.makedirs(os.path.join(self.xyz_folder, base_name), exist_ok=True)
-        inp_path = os.path.join(self.xyz_folder, f"{base_name}/{base_name}.inp")
+        os.makedirs(base / base_name, exist_ok=True)
+        inp_path = base / f"{base_name}/{base_name}.inp"
         with open(inp_path, "w") as inp_file:
             inp_file.write(inp_content)
         return inp_path
@@ -234,24 +239,21 @@ $orca $workspace_directory/$name/$name.inp > $workspace_directory/$name/$name.ou
         return script_content
 
     @staticmethod
-    def sh_script_erstellen(paths, base, frag_len, index_compound, time="40:00:00", time2="100:00:00", mem=360, scrap=700, main=True):
-        ret = []
-        for i, path in enumerate(paths):
-            name = Path(path).stem
-            total_path = f"{base}/{name}/{name}.sh"
-            if i == index_compound and main:
-                script_creator = ShellScriptCreator(
-                    int(mem * 4 * frag_len[i] / 48), frag_len[i], time2, path, name, base, scrap, main
-                )
-            else:
-                script_creator = ShellScriptCreator(
-                    int(mem * 2 * frag_len[i] / 48), frag_len[i], time, path, name, base
-                )
-            script_content = script_creator.create_sh_script_content()
-            with open(total_path, "w") as file:
-                file.write(script_content)
-            ret.append(total_path)
-        return ret
+    def single_sh_script_erstellen(path, base, i, frag_len, index_compound, time="40:00:00", time2="100:00:00", mem=360, scrap=700, main=True):
+        name = Path(path).stem
+        total_path = base / f"{name}/{name}.sh"
+        if i == index_compound and main:
+            script_creator = ShellScriptCreator(
+                int(mem * 4 * frag_len[i] / 48), frag_len[i], time2, path, name, base, scrap, main
+            )
+        else:
+            script_creator = ShellScriptCreator(
+                int(mem * 2 * frag_len[i] / 48), frag_len[i], time, path, name, base
+            )
+        script_content = script_creator.create_sh_script_content()
+        with open(total_path, "w") as file:
+            file.write(script_content)
+        return total_path
 
 
 class ChargeCalculator:
