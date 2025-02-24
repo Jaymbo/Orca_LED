@@ -1,10 +1,12 @@
+import logging
 from pathlib import Path
 import datetime
 from shutil import copy2
 import numpy as np  # pylint: disable=import-error
 from scipy.optimize import linear_sum_assignment  # pylint: disable=import-error
-import subprocess
 
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class Database:
     """
@@ -122,7 +124,7 @@ class Database:
             with file_path.open("r") as f:
                 content = f.read()
             rmsd_list.append(self.rmsd(candidate_xyz, content))
-        # print("Calculated RMSD values:", rmsd_list)
+        logging.info("Calculated RMSD values: %s", rmsd_list)
         return bool(rmsd_list) and min(rmsd_list) < self.rmsd_value
 
     def insert(self, dirpath: Path, filepath: Path) -> None:
@@ -133,12 +135,9 @@ class Database:
             out_path = Path(str(filepath) + end)
             with out_path.open("w") as f:
                 f.write("test")
-        # remove original .inp file
         self.header_filename.unlink()
         copy2(self.filename, xyz_path)
-        # subprocess.run(["sbatch", sh_path])
         self.create_symlink(xyz_path)
-
 
     def create_symlink(self, out_path: Path) -> None:
         """
@@ -148,7 +147,7 @@ class Database:
             end = self.file_end(file)
             if end is not None:
                 symlink = Path(f"{self.header_filename.parent}/{self.header_filename.stem}{end}")
-                if  symlink.exists():
+                if symlink.exists():
                     symlink.unlink()
                 symlink.symlink_to(file)
                 # symlink.chmod(0o444)
@@ -179,7 +178,7 @@ class Database:
         new_dir, new_filepath = db.create_filename(atoms, header)
         database_names = db.get_database_names()
         matched = db.find_matches(new_filepath.name, database_names)
-        # print("Matched folders:", matched)
+        logging.info("Matched folders: %s", matched)
 
         if not db.molecule_exists(candidate_xyz, matched):
             db.insert(new_dir, new_filepath)
@@ -217,7 +216,6 @@ class Database:
                 destination = Path(f"{destination}{end}")
                 copy2(file, destination)
         
-        
         destination = new_dir / new_filepath.stem
         destination = destination.with_suffix(".xyz")
         copy2(self.filename, destination)
@@ -226,7 +224,7 @@ class Database:
         destination = destination.with_suffix(".inp")
         copy2(self.header_filename, destination)
         
-        print(f"Calculation files copied to database folder: {new_dir}")
+        logging.info("Calculation files copied to database folder: %s", new_dir)
 
     def cleanup(self):
         """
@@ -251,8 +249,8 @@ class Database:
                         for file in rm.iterdir():
                             file.unlink()
                         rm.rmdir()
-            except:
-                print(f"Error in folder {folder.name}")
+            except Exception as e:
+                logging.error("Error in folder %s: %s", folder.name, e)
     
     def syslink_merge(self, original: Path, merged: Path):
         """
@@ -279,17 +277,4 @@ class Database:
                 for subfolder in folder.iterdir():
                     if subfolder.is_dir() and any(file.suffix == ".xyz" for file in folder.iterdir()):
                         Database(subfolder).add_calculation()
-
-
-# Example usage:
-if __name__ == "__main__":
-
-    # simple test
-    # Database.process_candidate(Path("/lustre/work/ws/ws1/tu_zxofv28-my_workspace/MRD_A_docked_4/MRD_A_docked_4"))
-
-    # copy everything to the database
-    # Database(Path("/lustre/work/ws/ws1/tu_zxofv28-my_workspace/MRD_A_docked_4/MRD_A_docked_4")).copy_to_db()
-    
-    # nach db merge cleanup
-    # Database(Path("/lustre/work/ws/ws1/tu_zxofv28-my_workspace/MRD_A_docked_4/MRD_A_docked_4")).cleanup()
-    print("done")
+        self.cleanup()
