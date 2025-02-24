@@ -1,54 +1,14 @@
-import time
-
-start_time = time.time()
 import os
-print(f"os imported in {time.time() - start_time:.4f} seconds")
-
-start_time = time.time()
 import re
-print(f"re imported in {time.time() - start_time:.4f} seconds")
-
-start_time = time.time()
 import streamlit as st
-print(f"streamlit imported in {time.time() - start_time:.4f} seconds")
-
-start_time = time.time()
 from pathlib import Path
-print(f"pathlib imported in {time.time() - start_time:.4f} seconds")
-
-start_time = time.time()
 import pipeline
-print(f"pipeline imported in {time.time() - start_time:.4f} seconds")
-
-start_time = time.time()
 from LED_extraction import extract_LED_energy
-print(f"LED_extraction imported in {time.time() - start_time:.4f} seconds")
-
-start_time = time.time()
 from csv_to_viz import extrakt
-print(f"csv_to_viz imported in {time.time() - start_time:.4f} seconds")
-
-start_time = time.time()
-import subprocess
-print(f"subprocess imported in {time.time() - start_time:.4f} seconds")
-
-start_time = time.time()
 from visualization import MoleculeVisualizer
-print(f"visualization imported in {time.time() - start_time:.4f} seconds")
-
-start_time = time.time()
 from config_manager import FragmentConfig
-print(f"config_manager imported in {time.time() - start_time:.4f} seconds")
-
-start_time = time.time()
 import logging
-print(f"logging imported in {time.time() - start_time:.4f} seconds")
-
-start_time = time.time()
 from logging.handlers import RotatingFileHandler
-print(f"RotatingFileHandler imported in {time.time() - start_time:.4f} seconds")
-
-from database import Database
 
 topics_progress_b, total_files_b, completed_files_b, pending_jobs_b = {}, 0, 0, []
 
@@ -131,14 +91,10 @@ def upload_file_and_start_calculation():
                 path.parent.rmdir()
             else:
                 file_paths.append(handle_file_upload(f))
-            
-            print(file_paths)
         visualize_xyz(file_paths)
 
     fragment_input = st.text_input("Fragmentierungsangabe", value=default_fragment)
     header_input = st.text_area("Zusätzliche Header-Einstellungen für die .inp-Datei (optional)", """! DLPNO-CCSD(T) def2-svp def2-svp/C DEF2/J RIJCOSX tightSCF normalPNO LED
-
-%mdci DoDIDplot true end
 
 %maxcore 160000
 
@@ -151,16 +107,12 @@ end""")
                 file = file_paths[i]
                 config.save_fragment(file.name, fragment_input)
                 st.info("Die Berechnung wurde in auftrag gegeben...")
-                paths, base, frag_len, index_compound = pipeline.ORCAInputFileCreator(str(file_paths[i]), fragment_input, header_input).create_inp_files()
-                if fragment_input == "-1":
-                    ret = pipeline.ShellScriptCreator.sh_script_erstellen(paths, base, frag_len, index_compound, time="2:00:00", mem=20, main=False)
-                else:
-                    ret = pipeline.ShellScriptCreator.sh_script_erstellen(paths, base, frag_len, index_compound)
+                pipeline.ORCAInputFileCreator(str(file_paths[i]), fragment_input, header_input).create_inp_files()
                 st.info("Die Berechnung wurde vorbereitet.")
-                for r in ret:
-                    Database.process_candidate(Path(r).parent)
+                logging.info(f"Calculation started for file: {file.name}")
         else:
             st.error("Bitte wählen Sie eine Datei aus.")
+            logging.warning("No file selected for calculation.")
 
 def check_orca_termination(content):
     return "****ORCA TERMINATED NORMALLY****" in content
@@ -217,6 +169,7 @@ def get_error_file(path):
             if "aborting the run" in content:
                 return "aborted"
         except Exception as e:
+            logging.error(f"Error reading error file: {str(e)}")
             return f"Error: {str(e)}"
     return None
 
@@ -254,6 +207,7 @@ def get_color_and_progress(progress: str) -> tuple:
 
 @st.fragment(run_every="60s")
 def check_progress_of_all_jobs():
+    logging.info("Checking progress of all jobs.")
     topics_dir = "/lustre/work/ws/ws1/tu_zxofv28-my_workspace/"
     global total_files_b, completed_files_b, pending_jobs_b, topics_progress_b
     topics_progress = {}
@@ -305,6 +259,7 @@ def check_progress_of_all_jobs():
         total_files_b = total_files
         completed_files_b = completed_files
     update_dashboard(topics_progress, total_files, completed_files, pending_jobs)
+    logging.info("Finished checking progress of all jobs.")
 
 def energy_extraction(context):
     matches = list(re.finditer(r"FINAL SINGLE POINT ENERGY \s+([-+]?\d+\.\d+)", context))
@@ -313,7 +268,7 @@ def energy_extraction(context):
     return float(matches[-1].group(1))
 
 def update_dashboard(topics_progress, total_files, completed_files, pending_jobs):
-
+    logging.info("Updating dashboard.")
     st.title('ORCA-Status')
 
     st.write(f"Gesamtfortschritt: {completed_files} von {total_files} abgeschlossen.")
@@ -345,9 +300,11 @@ def update_dashboard(topics_progress, total_files, completed_files, pending_jobs
             visualize_in_3Dmol(Path(folder), Path(folder) / "viz.py")
 
             st.text(f"Alle Berechnungen abgeschlossen!")
+            logging.info(f"All calculations completed for topic: {topic}")
         elif not_started_jobs == total_jobs:
             st.markdown(f"<div style='background-color: grey; height: 10px; width: 100%'></div>", unsafe_allow_html=True)
             st.text(f"Alle Berechnungen noch nicht gestartet.")
+            logging.info(f"No calculations started for topic: {topic}")
         else:
             num_columns = 7
             cols = st.columns(num_columns)
@@ -370,6 +327,7 @@ def update_dashboard(topics_progress, total_files, completed_files, pending_jobs
                     st.markdown(f"<div style='background-color: {color}; height: 10px; width: {progress_value}%'></div>", unsafe_allow_html=True)
 
             st.text(f"Fortschritt des Topics: {completed_jobs}/{total_jobs} abgeschlossen")
+            logging.info(f"Progress for topic {topic}: {completed_jobs}/{total_jobs} completed.")
     
 setup_logging()
 check_progress_of_all_jobs()
