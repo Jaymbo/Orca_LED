@@ -87,7 +87,7 @@ end"""
 
     def create_inp_files(self):
         logging.info("Creating ORCA input files")
-        if self.fragments != "-1":
+        if self.fragments == "":
             self.fragments = FragmentExtractor.extract_fragments(self.file)
             logging.info(f"fragments: {self.fragments}")
         if self.file.endswith(".mol2"):
@@ -114,15 +114,15 @@ end"""
                 ind = i
                 led = True
             self.create_single_inp_file(xyz_file_i, Path(xyz_file_i).parent, self.frag_len, i, fragment_lines, led)
-            led = False
             path = Database.process_candidate(Path(xyz_file_i.split(".")[0]))
             if path is not None:
-                self.create_single_inp_file(path, Path(path).parents[1], self.frag_len, i, fragment_lines)
+                self.create_single_inp_file(path, Path(path).parents[1], self.frag_len, i, fragment_lines, led)
                 if self.fragments == "-1":
                     sh_path = ShellScriptCreator.single_sh_script_erstellen(path, Path(path).parents[1], i, self.frag_len, ind, time="2:00:00", mem=20, main=False)
                 else:
                     sh_path = ShellScriptCreator.single_sh_script_erstellen(path, Path(path).parents[1], i, self.frag_len, ind)
                 subprocess.run(["sbatch", sh_path])
+            led = False
 
     def handle_fragments(self):
         logging.info("Handling fragments")
@@ -192,40 +192,40 @@ class ShellScriptCreator:
 
     def create_sh_script_content(self):
         logging.info("Creating shell script content")
-        if self.main:
-            script_content = f"""#!/bin/bash
-#SBATCH --nodes=1
-#SBATCH --mem={self.mem}gb
-#SBATCH --ntasks-per-node={self.nprocs}
-#SBATCH --gres=scratch:{self.scrap}
-#SBATCH --output={self.path}_out.out
-#SBATCH --error={self.path}_err.err
-#SBATCH --time={self.time}
+#         if self.main:
+#             script_content = f"""#!/bin/bash
+# #SBATCH --nodes=1
+# #SBATCH --mem={self.mem}gb
+# #SBATCH --ntasks-per-node={self.nprocs}
+# #SBATCH --gres=scratch:{self.scrap}
+# #SBATCH --output={self.path}_out.out
+# #SBATCH --error={self.path}_err.err
+# #SBATCH --time={self.time}
 
-name={self.name}
+# name={self.name}
 
-workspace_directory={self.base}
-orca=/opt/bwhpc/common/chem/orca/6.0.1_shared_openmpi-4.1.6_avx2/orca
+# workspace_directory={self.base}
+# orca=/opt/bwhpc/common/chem/orca/6.0.1_shared_openmpi-4.1.6_avx2/orca
 
-echo $name
-module load chem/orca/6.0.1
-module load mpi/openmpi/4.1
-module list
+# echo $name
+# module load chem/orca/6.0.1
+# module load mpi/openmpi/4.1
+# module list
 
-echo "kopieren der .inp"
-cp $workspace_directory/$name/$name.inp $SCRATCH
+# echo "kopieren der .inp"
+# cp $workspace_directory/$name/$name.inp $SCRATCH
 
-echo "ins scatch"
-cd $SCRATCH
+# echo "ins scatch"
+# cd $SCRATCH
 
-echo "ausführen"
-$orca $name.inp > $name.out
+# echo "ausführen"
+# $orca $name.inp > $name.out
 
-echo "kopieren ohne tmp"
-find $SCRATCH -type f ! -name '*tmp*' -exec cp {{}} $workspace_directory/$name/ \;
-"""
-        else:
-            script_content = f"""#!/bin/bash
+# echo "kopieren ohne tmp"
+# find $SCRATCH -type f ! -name '*tmp*' -exec cp {{}} $workspace_directory/$name/ \;
+# """
+#         else:
+        script_content = f"""#!/bin/bash
 #SBATCH --nodes=1
 #SBATCH --mem={self.mem}gb
 #SBATCH --ntasks-per-node={self.nprocs}
@@ -254,7 +254,7 @@ $orca $workspace_directory/$name/$name.inp > $workspace_directory/$name/$name.ou
         total_path = base / f"{name}/{name}.sh"
         if i == index_compound and main:
             script_content = ShellScriptCreator(
-                int(mem * 2 * frag_len[i] / 48), frag_len[i], time2, path, name, base, scrap, main
+                int(mem * 4 * frag_len[i] / 48), frag_len[i], time2, path, name, base, scrap, main
             ).create_sh_script_content()
         else:
             script_content = ShellScriptCreator(

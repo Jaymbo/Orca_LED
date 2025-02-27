@@ -6,7 +6,7 @@ import pandas as pd
 
 def extract(folder, ligand=False):
     bindungen, werte = fetch_data(folder)
-    if not bindungen or not werte:
+    if bindungen is None and werte is None:
         return
 
     if ligand:

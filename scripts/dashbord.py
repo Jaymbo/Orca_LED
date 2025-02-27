@@ -119,8 +119,6 @@ def check_orca_termination(content):
 def get_progress_of_job(output, path):
     runtime = None
     error_status = get_error_file(path)
-    if error_status is not None:
-        return error_status, None
     
     status, runtime = check_slurm_job_status_and_duration(path)
     if status != "Not Finished":
@@ -128,6 +126,9 @@ def get_progress_of_job(output, path):
 
     if check_orca_termination(output):
         return "Progress: 100%", runtime
+    
+    if error_status is not None:
+        return error_status, None
     count = 0
     output = output.split("\n")
     if "INITIAL GUESS DONE" in output:
@@ -293,7 +294,7 @@ def update_dashboard(topics_progress, total_files, completed_files, pending_jobs
             energy = 2 * jobs[list(jobs.keys())[0]][3]
             for i in range(completed_jobs):
                 energy -= jobs[list(jobs.keys())[i]][3]
-            st.text(f"{energy * 627.509474:.2f} kcal/mol")
+            st.text(f"{energy * 627.509474:.6f} kcal/mol")
             extract_LED_energy(folder)
             extract(folder)
             visualize_in_3Dmol(Path(folder), Path(folder) / "viz.py")
