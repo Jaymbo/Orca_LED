@@ -2,8 +2,8 @@ import logging
 from pathlib import Path
 import datetime
 from shutil import copy2
-import numpy as np  # pylint: disable=import-error
-from scipy.optimize import linear_sum_assignment  # pylint: disable=import-error
+import numpy as np
+from scipy.optimize import linear_sum_assignment
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -17,12 +17,14 @@ class Database:
 
     def __init__(self, dir: Path) -> None:
         self.base = Path("/lustre/work/ws/ws1/tu_zxofv28-my_workspace/database/")
+        if not self.base.exists():
+            self.base.mkdir(parents=True, exist_ok=True)
         self.dir: Path = dir
         self.filename: Path
         self.header_filename: Path
         self.get_file_paths()
         self.rmsd_value = 0.001
-        self.ends = ["_out.out", ".out", ".densities", "_err.err", ".gbw", ".property.txt", ".bibtex", ".cube", ".densitiesinfo", ".sh", ".inp"]
+        self.ends = ["_out.out", ".out", ".densities", "_err.err", ".property.txt", ".bibtex", ".cube", ".densitiesinfo", ".sh", ".inp"]
 
     def get_file_paths(self):
         """
@@ -125,7 +127,11 @@ class Database:
                 content = f.read()
             rmsd_list.append(self.rmsd(candidate_xyz, content))
         logging.info("Calculated RMSD values: %s", rmsd_list)
-        return bool(rmsd_list) and min(rmsd_list) < self.rmsd_value
+        # sort matched nach rmsd
+        matched = [x for _, x in sorted(zip(rmsd_list, matched))]
+        exists = bool(rmsd_list) and min(rmsd_list) < self.rmsd_value
+        print(exists)
+        return matched, exists
 
     def insert(self, dirpath: Path, filepath: Path) -> None:
         dirpath.mkdir(parents=True, exist_ok=True) 
@@ -179,8 +185,9 @@ class Database:
         database_names = db.get_database_names()
         matched = db.find_matches(new_filepath.name, database_names)
         logging.info("Matched folders: %s", matched)
+        matched, exists = db.molecule_exists(candidate_xyz, matched)
 
-        if not db.molecule_exists(candidate_xyz, matched):
+        if not exists:
             db.insert(new_dir, new_filepath)
             return str(new_filepath) + ".xyz"
         else:

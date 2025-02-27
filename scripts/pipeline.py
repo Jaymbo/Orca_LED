@@ -56,25 +56,6 @@ class Mol2FileHandler:
             logging.error(f"Error writing file: {output_xyz}")
             raise ValueError(f"Error writing file: {output_xyz}")
 
-    def extract_fragments_from_mol2(self):
-        logging.info(f"Extracting fragments from MOL2 file: {self.input_mol2}")
-        fragments = []
-        with open(self.input_mol2, "r") as mol2_file:
-            inside_atoms = False
-            for line in mol2_file:
-                if line.startswith("@<TRIPOS>ATOM"):
-                    inside_atoms = True
-                elif line.startswith("@<TRIPOS>BOND"):
-                    inside_atoms = False
-                elif inside_atoms:
-                    parts = line.split()
-                    if len(parts) > 7:
-                        fragments.append(parts[7])
-        fragment_assignments = {}
-        for idx, group in enumerate(fragments):
-            fragment_assignments.setdefault(group, []).append(idx)
-        return fragment_assignments
-
 
 class ORCAInputFileCreator:
     def __init__(self, file, fragments=None, header_in=None):
@@ -100,15 +81,19 @@ end"""
         inp_content = f"{self.header}{npros}\nend\n*XYZfile {charge} 1 {xyz_file}\n\n"
         if fragment_lines:
             inp_content += "".join(fragment_lines)
+        else:
+            inp_content = inp_content.replace(" LED", "")
         return inp_content
 
     def create_inp_files(self):
         logging.info("Creating ORCA input files")
+        if self.fragments != "-1":
+            self.fragments = FragmentExtractor.extract_fragments(self.file)
+            logging.info(f"fragments: {self.fragments}")
         if self.file.endswith(".mol2"):
             mol2_handler = Mol2FileHandler(self.file)
-            if self.fragments == "":
-                self.fragments = mol2_handler.extract_fragments_from_mol2()
             mol2_handler.convert_mol2_to_xyz(self.xyz_file)
+            logging.info(f"Converted MOL2 file to XYZ: {self.file} -> {self.xyz_file}")
 
         if self.fragments != "-1":
             fragment_lines = self.handle_fragments()
@@ -121,16 +106,19 @@ end"""
             return
 
         ind = 0
+        led = False
         for i, xyz_file_i in enumerate(xyz_files):
             sum_atoms = min(len(open(self.file).read().split("\n")) - 2, 48) if os.path.basename(self.xyz_file).split(".")[0] == os.path.basename(xyz_file_i).split(".")[0] else None
             if sum_atoms:
                 self.frag_len = self.frag_len[:i] + [sum_atoms] + self.frag_len[i:]
                 ind = i
-            self.create_single_inp_file(xyz_file_i, Path(xyz_file_i).parent, self.frag_len, i, fragment_lines)
+                led = True
+            self.create_single_inp_file(xyz_file_i, Path(xyz_file_i).parent, self.frag_len, i, fragment_lines, led)
+            led = False
             path = Database.process_candidate(Path(xyz_file_i.split(".")[0]))
             if path is not None:
                 self.create_single_inp_file(path, Path(path).parents[1], self.frag_len, i, fragment_lines)
-                if self.fragments != "-1":
+                if self.fragments == "-1":
                     sh_path = ShellScriptCreator.single_sh_script_erstellen(path, Path(path).parents[1], i, self.frag_len, ind, time="2:00:00", mem=20, main=False)
                 else:
                     sh_path = ShellScriptCreator.single_sh_script_erstellen(path, Path(path).parents[1], i, self.frag_len, ind)
@@ -138,8 +126,6 @@ end"""
 
     def handle_fragments(self):
         logging.info("Handling fragments")
-        if self.fragments is None or self.fragments == "":
-            self.fragments = FragmentExtractor.extract_fragments(self.file)
         fragment_groups = self.parse_fragments(self.fragments)
 
         self.calculate_frag_len(fragment_groups)
@@ -173,13 +159,13 @@ end"""
         fragment_lines.append(" end\nend\n")
         return fragment_lines
 
-    def create_single_inp_file(self, xyz_file_i, base, frag_len, i, fragment_lines):
+    def create_single_inp_file(self, xyz_file_i, base, frag_len, i, fragment_lines, led = False):
         logging.info(f"Creating single ORCA input file for: {xyz_file_i}")
         base_name = os.path.splitext(os.path.basename(xyz_file_i))[0]
         charge = ChargeCalculator.calculate_charge(
             self.file if os.path.basename(self.xyz_file).split(".")[0] == os.path.basename(xyz_file_i).split(".")[0] else xyz_file_i
         )
-        inp_content = self.create_inp_file_content(charge, frag_len[i], xyz_file_i, fragment_lines if self.fragments != "-1" else None)
+        inp_content = self.create_inp_file_content(charge, frag_len[i], xyz_file_i, fragment_lines if led else None)
 
         os.makedirs(base / base_name, exist_ok=True)
         inp_path = base / f"{base_name}/{base_name}.inp"
@@ -263,18 +249,17 @@ $orca $workspace_directory/$name/$name.inp > $workspace_directory/$name/$name.ou
         return script_content
 
     @staticmethod
-    def single_sh_script_erstellen(path, base, i, frag_len, index_compound, time="40:00:00", time2="100:00:00", mem=360, scrap=700, main=True):
+    def single_sh_script_erstellen(path, base, i, frag_len, index_compound, time="04:00:00", time2="10:00:00", mem=180, scrap=700, main=True):
         name = Path(path).stem
         total_path = base / f"{name}/{name}.sh"
         if i == index_compound and main:
-            script_creator = ShellScriptCreator(
-                int(mem * 4 * frag_len[i] / 48), frag_len[i], time2, path, name, base, scrap, main
-            )
+            script_content = ShellScriptCreator(
+                int(mem * 2 * frag_len[i] / 48), frag_len[i], time2, path, name, base, scrap, main
+            ).create_sh_script_content()
         else:
-            script_creator = ShellScriptCreator(
-                int(mem * 2 * frag_len[i] / 48), frag_len[i], time, path, name, base
-            )
-        script_content = script_creator.create_sh_script_content()
+            script_content = ShellScriptCreator(
+                int(mem * frag_len[i] / 48), frag_len[i], time, path, name, base
+            ).create_sh_script_content()
         with open(total_path, "w") as file:
             file.write(script_content)
         return total_path

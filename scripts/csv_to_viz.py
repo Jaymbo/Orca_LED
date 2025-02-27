@@ -2,26 +2,12 @@ import pymolviz
 import numpy as np
 import os
 import glob
-import csv
+import pandas as pd
 
-def extrakt(folder, part=6, ligand=False):
-    dateiname = str(folder) + "/daten.csv"
-    bindungen = []
-    werte = []
-    
-    if not os.path.exists(dateiname):
+def extract(folder, ligand=False):
+    bindungen, werte = fetch_data(folder)
+    if not bindungen or not werte:
         return
-
-    with open(dateiname, newline='', encoding='utf-8') as csvfile:
-        reader = csv.reader(csvfile, delimiter=';')
-        headers = next(reader)
-        bindungen = [header.split("-") for header in headers[1:]]
-        for row in reader:
-            werte.append(row[1:])
-
-    werte = np.array(werte[part], dtype=str)
-    werte = np.array([float(w.replace(",", ".")) for w in werte])
-    bindungen = np.array(bindungen)
 
     if ligand:
         mask = (np.array([int(b[0]) for b in bindungen]) == 1)
@@ -32,6 +18,7 @@ def extrakt(folder, part=6, ligand=False):
         bindungen = np.concatenate((bindungen_new, bindungen[mask]))
         werte = np.concatenate((werte_new, werte[mask].astype(float)))
 
+    print(werte)
     mi = np.min(werte)
     ma = np.max(werte)
     if -mi > ma:
@@ -83,3 +70,34 @@ def extrakt(folder, part=6, ligand=False):
 
     bind = np.array(bind)
     pymolviz.Lines(bind, name="Lines", transparency=werte, color=col).write(f"{folder}/viz.py")
+
+def fetch_data(folder):
+    """
+    zieht daten aus der exel datei und speichert sie entsprechnet in bindungen und werte
+    """
+    dateiname = str(folder) + "/Summary_fp-LED_matrices.xlsx"
+    bindungen = []
+    werte = []
+    
+    if not os.path.exists(dateiname):
+        return bindungen, werte
+
+    # read xlsx file and get the data
+    data = pd.read_excel(dateiname, sheet_name=None)
+    #sheet name is TOTAL
+    data = data["TOTAL"]
+    # data zu 2d list
+    data = data.values.tolist()
+    # data transponieren
+    data = list(map(list, zip(*data)))
+    for i, row in enumerate(data):
+        for j, value in enumerate(row):
+            if i <= j+1:
+                continue
+            bindungen.append([j+1, i])
+            werte.append(str(value))
+    werte = np.array([float(w.replace(",", ".")) for w in werte])
+    bindungen = np.array(bindungen)
+    print(bindungen)
+    print(werte)
+    return bindungen, werte

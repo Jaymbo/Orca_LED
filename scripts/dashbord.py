@@ -4,7 +4,7 @@ import streamlit as st
 from pathlib import Path
 import pipeline
 from LED_extraction import extract_LED_energy
-from csv_to_viz import extrakt
+from csv_to_viz import extract
 from visualization import MoleculeVisualizer
 from config_manager import FragmentConfig
 import logging
@@ -109,7 +109,6 @@ end""")
                 st.info("Die Berechnung wurde in auftrag gegeben...")
                 pipeline.ORCAInputFileCreator(str(file_paths[i]), fragment_input, header_input).create_inp_files()
                 st.info("Die Berechnung wurde vorbereitet.")
-                logging.info(f"Calculation started for file: {file.name}")
         else:
             st.error("Bitte wählen Sie eine Datei aus.")
             logging.warning("No file selected for calculation.")
@@ -296,7 +295,7 @@ def update_dashboard(topics_progress, total_files, completed_files, pending_jobs
                 energy -= jobs[list(jobs.keys())[i]][3]
             st.text(f"{energy * 627.509474:.2f} kcal/mol")
             extract_LED_energy(folder)
-            extrakt(folder)
+            extract(folder)
             visualize_in_3Dmol(Path(folder), Path(folder) / "viz.py")
 
             st.text(f"Alle Berechnungen abgeschlossen!")
