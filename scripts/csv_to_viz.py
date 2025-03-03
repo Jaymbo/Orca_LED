@@ -3,26 +3,45 @@ import numpy as np
 import os
 import glob
 import pandas as pd
+import logging
+import time
 
+def track_time(func):
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        logging.info(f"Function '{func.__name__}' took {elapsed_time:.2f} seconds to complete.")
+        return result
+    return wrapper
+
+@track_time
 def extract(folder, ligand=False):
+    viz_file = f"{folder}/viz.py"
+    xyz_file = f"{folder}/{os.path.basename(folder)}.xyz"
+    if not os.path.exists(viz_file):
+        print(f"File {viz_file} does not exist.")
+        return
+    if not os.path.exists(xyz_file):
+        print(f"File {xyz_file} does not exist.")
+        return 
+    xlsx_time = os.path.getmtime(viz_file)
+    xyz_time = os.path.getmtime(xyz_file)
+    if xlsx_time < xyz_time:
+        print(f"File {viz_file} is older than {xyz_file}.")
+        return
     bindungen, werte = fetch_data(folder)
     if bindungen is None and werte is None:
         return
 
     if ligand:
-        mask = (np.array([int(b[0]) for b in bindungen]) == 1)
-        bindungen_new = bindungen[mask]
-        werte_new = werte[mask].astype(float)
+        mask = (np.array([int(b[0]) for b in bindungen]) == 6)
+        bindungen = bindungen[mask]
+        werte = werte[mask].astype(float)
 
-        mask = (np.array([int(b[0]) for b in bindungen]) == 1)
-        bindungen = np.concatenate((bindungen_new, bindungen[mask]))
-        werte = np.concatenate((werte_new, werte[mask].astype(float)))
-
-    print(werte)
     mi = np.min(werte)
-    ma = np.max(werte)
-    if -mi > ma:
-        ma = -mi
+    ma = max(np.abs(mi), np.max(werte))
 
     mask_less0 = werte < 0
     mask_greater0 = werte > 0
@@ -47,10 +66,8 @@ def extract(folder, ligand=False):
     for number in fragment_numbers:
         xyz_file = os.path.join(folder, f"fragment_{str(number).zfill(3)}.xyz")
         if os.path.exists(xyz_file):
-            with open(xyz_file, newline='', encoding='utf-8') as xyzfile:
-                lines = xyzfile.readlines()[2:]  # Erste zwei Zeilen überspringen
-                coordinates = np.array([list(map(float, line.split()[1:4])) for line in lines])
-                mean_coordinates_dict[number] = coordinates  # Speichert alle Koordinaten des Fragments
+            coordinates = pd.read_csv(xyz_file, sep='\s+', skiprows=2, usecols=[1, 2, 3], header=None).values
+            mean_coordinates_dict[number] = coordinates
 
     bind = []
 
@@ -83,13 +100,7 @@ def fetch_data(folder):
         return bindungen, werte
 
     # read xlsx file and get the data
-    data = pd.read_excel(dateiname, sheet_name=None)
-    #sheet name is TOTAL
-    data = data["TOTAL"]
-    # data zu 2d list
-    data = data.values.tolist()
-    # data transponieren
-    data = list(map(list, zip(*data)))
+    data = pd.read_excel(dateiname, sheet_name="TOTAL").values.T.tolist()
     for i, row in enumerate(data):
         for j, value in enumerate(row):
             if i <= j+1:
@@ -98,6 +109,4 @@ def fetch_data(folder):
             werte.append(str(value))
     werte = np.array([float(w.replace(",", ".")) for w in werte])
     bindungen = np.array(bindungen)
-    print(bindungen)
-    print(werte)
     return bindungen, werte

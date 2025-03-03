@@ -4,6 +4,8 @@ import datetime
 from shutil import copy2
 import numpy as np
 from scipy.optimize import linear_sum_assignment
+import time
+import os
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -96,59 +98,52 @@ class Database:
 
     def right_fragmentation(self, header_str, col_ind):
         fragmentation = self.get_fragmentation(header_str)
-        for frag in fragmentation:
-            for i, f in enumerate(frag):
-                if col_ind is not None:
-                    frag[i] = int(f)
-                else:
-                    frag[i] = col_ind[int(f)]
-            frag.sort()
-        fragmentation.sort()
-        return fragmentation
+        if col_ind is not None:
+            fragmentation = [np.sort(np.array([col_ind[int(f)] for f in frag], dtype=int)) for frag in fragmentation]
+        return sorted(fragmentation, key=lambda x: x.tolist())
 
     def get_fragmentation(self, header_str):
-        header_lines = header_str.splitlines()
-        frag = False
         fragments = []
-        for line in header_lines:
-            if "end" in line:
-                frag = False
-            if frag:
-                print(line)
-                fragments.append(line.split("{")[1].split("}")[0].split(" ").sort())
-            if "Fragments" in line:
-                frag = True
-        fragments.sort()
-        return fragments
+        lines = header_str.splitlines()
+        frag_start = np.where(np.char.find(lines, "Fragments") >= 0)[0]
+        frag_end = np.where(np.char.find(lines, "end") >= 0)[0]
+
+        if frag_start.size > 0 and frag_end.size > 0:
+            frag_lines = lines[frag_start[0] + 1:frag_end[0]]
+            fragments = [np.sort(line.split("{")[1].split("}")[0].split(), axis=0) for line in frag_lines]
+        return sorted(fragments, key=lambda x: x.tolist())
 
     def molecule_exists(self, candidate_xyz: str, matched: list, header_str: str) -> tuple[list, bool]:
         """Check if the molecule already exists in the database"""
-        rmsd_list = []
+        if not matched:
+            return matched, False
         fragments = self.right_fragmentation(header_str, None)
-        col_ind = []
 
-        for folder in matched:
+        def compute_rmsd_and_col(folder):
             xyz_path = self.base / folder / f"{folder}.xyz"
             with xyz_path.open("r") as f:
                 content = f.read()
-            erg, col = self.rmsd(candidate_xyz, content)
-            col_ind.append(col)
-            rmsd_list.append(erg)
+            return self.rmsd(candidate_xyz, content)
 
-        new_matched = []
-        new_erg = []
-        for i, folder in enumerate(matched):
+        results = [compute_rmsd_and_col(folder) for folder in matched]
+        rmsd_list = np.array([result[0] for result in results], dtype=float)
+        col_ind = [result[1] for result in results]
+
+        def check_fragmentation(folder, col):
             inp_path = self.base / folder / f"{folder}.inp"
             with inp_path.open("r") as f:
                 content = f.read()
-            if self.right_fragmentation(content, col_ind[i]) == fragments:
-                new_matched.append(folder)
-                new_erg.append(rmsd_list[i])
+            return self.right_fragmentation(content, col) == fragments
 
-        rmsd_list = new_erg
-        matched = new_matched
-        logging.info("Calculated RMSD values: %s", rmsd_list)
-        matched = [x for _, x in sorted(zip(rmsd_list, matched))]
+        fragmentation_matches = np.array([check_fragmentation(folder, col) for folder, col in zip(matched, col_ind)])
+
+        new_matched = np.array(matched)[fragmentation_matches]
+        new_rmsd_list = rmsd_list[fragmentation_matches]
+
+        sorted_indices = np.argsort(new_rmsd_list)
+        matched = new_matched[sorted_indices].tolist()
+        rmsd_list = new_rmsd_list[sorted_indices].tolist()
+
         exists = bool(rmsd_list) and min(rmsd_list) < self.rmsd_value
         return matched, exists
 
@@ -158,20 +153,19 @@ class Database:
         xyz_path = filepath.with_suffix(".xyz")
         for end in self.ends:
             out_path = Path(str(filepath) + end)
-            with out_path.open("w") as f:
-                f.write("test")
+            with os.fdopen(os.open(out_path, os.O_WRONLY | os.O_CREAT, 0o644), 'w') as file:
+                file.write("test")
         self.header_filename.unlink()
         copy2(self.filename, xyz_path)
         self.create_symlink(xyz_path)
 
     def create_symlink(self, out_path: Path) -> None:
-        for file in out_path.parent.iterdir():
-            end = self.file_end(file)
-            if end is not None:
-                symlink = Path(f"{self.header_filename.parent}/{self.header_filename.stem}{end}")
-                if symlink.exists():
-                    symlink.unlink()
-                symlink.symlink_to(file)
+        symlink_base = self.header_filename.parent / self.header_filename.stem
+        for end in self.ends:
+            symlink = Path(f"{symlink_base}{end}")
+            if symlink.exists():
+                symlink.unlink()
+            symlink.symlink_to(Path(f"{out_path.parent}/{out_path.stem}{end}"))
 
     def file_end(self, filename: Path) -> str:
         for match in self.ends:
@@ -181,26 +175,51 @@ class Database:
 
     @classmethod
     def process_candidate(cls, dir: Path) -> Path:
+        start_time = time.time()
         db = cls(dir)
+        
+        step_start = time.time()
         candidate_xyz = db.get_filecontent()
         atoms = db.atoms_from_filecontent(candidate_xyz)
         header = db.header_from_file()
         new_dir, new_filepath = db.create_filename(atoms)
+        step_end = time.time()
+        #logging.info("Step 1: Prepare candidate data - Time taken: %.4f seconds", step_end - step_start)
+        
+        step_start = time.time()
         database_names = db.get_database_names()
         matched = db.find_matches(new_filepath.name, database_names)
-        logging.info("Matched folders: %s", matched)
+        step_end = time.time()
+        #logging.info("Step 2: Find matches in database - Time taken: %.4f seconds", step_end - step_start)
+        
+        step_start = time.time()
         matched, exists = db.molecule_exists(candidate_xyz, matched, header)
+        step_end = time.time()
+        logging.info("Step 3: Check if molecule exists - Time taken: %.4f seconds", step_end - step_start)
 
         if not exists:
+            step_start = time.time()
             db.insert(new_dir, new_filepath)
+            step_end = time.time()
+            logging.info("Step 4: Insert new molecule - Time taken: %.4f seconds", step_end - step_start)
+            
+            end_time = time.time()
+            logging.info("Total time taken to process candidate: %.4f seconds", end_time - start_time)
             return str(new_filepath) + ".xyz"
         else:
+            step_start = time.time()
             existing_folder = db.base / matched[0]
             out_path = existing_folder / (matched[0] + ".out")
             db.create_symlink(out_path)
+            step_end = time.time()
+            logging.info("Step 4: Create symlink for existing molecule - Time taken: %.4f seconds", step_end - step_start)
+            
+            end_time = time.time()
+            logging.info("Total time taken to process candidate: %.4f seconds", end_time - start_time)
             return None
 
     def add_calculation(self):
+        start_time = time.time()
         candidate_xyz = self.get_filecontent()
         atoms = self.atoms_from_filecontent(candidate_xyz)
         header = self.header_from_file()
@@ -222,9 +241,12 @@ class Database:
         destination = destination.with_suffix(".inp")
         copy2(self.header_filename, destination)
 
+        end_time = time.time()
         logging.info("Calculation files copied to database folder: %s", new_dir)
+        logging.info("Time taken to add calculation: %.2f seconds", end_time - start_time)
 
     def cleanup(self):
+        start_time = time.time()
         database_names = self.get_database_names()
         for folder in self.base.iterdir():
             try:
@@ -246,6 +268,8 @@ class Database:
                         rm.rmdir()
             except Exception as e:
                 logging.error("Error in folder %s: %s", folder.name, e)
+        end_time = time.time()
+        logging.info("Time taken to clean up: %.2f seconds", end_time - start_time)
 
     def syslink_merge(self, original: Path, merged: Path):
         dir = Path("/lustre/work/ws/ws1/tu_zxofv28-my_workspace/")
@@ -259,6 +283,7 @@ class Database:
                                 file.symlink_to(merged)
 
     def copy_to_db(self):
+        start_time = time.time()
         dir = Path("/lustre/work/ws/ws1/tu_zxofv28-my_workspace/")
         for folder in dir.iterdir():
             if folder.is_dir():
@@ -266,3 +291,5 @@ class Database:
                     if subfolder.is_dir() and any(file.suffix == ".xyz" for file in folder.iterdir()):
                         Database(subfolder).add_calculation()
         self.cleanup()
+        end_time = time.time()
+        logging.info("Time taken to copy to database: %.2f seconds", end_time - start_time)

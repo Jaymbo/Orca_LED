@@ -9,8 +9,8 @@ from visualization import MoleculeVisualizer
 from config_manager import FragmentConfig
 import logging
 from logging.handlers import RotatingFileHandler
+import time
 
-topics_progress_b, total_files_b, completed_files_b, pending_jobs_b = {}, 0, 0, []
 
 def setup_logging():
     log_format = '%(asctime)s - %(levelname)s - %(message)s'
@@ -31,6 +31,17 @@ def setup_logging():
         datefmt='%Y-%m-%d %H:%M:%S'
     )
 
+def track_time(func):
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        logging.info(f"Function '{func.__name__}' took {elapsed_time:.4f} seconds to complete.")
+        return result
+    return wrapper
+
+@track_time
 def visualize_xyz(molecule_path: Path):
     viewer = MoleculeVisualizer.render_xyz(molecule_path)
     st.session_state.previous_xyz = viewer  # Nur wenn benötigt
@@ -73,6 +84,7 @@ def sanitize_saving(content: list[str], name: str):
         paths.append(save_path)
     return paths
 
+@track_time
 def upload_file_and_start_calculation():
     config = FragmentConfig()
     default_fragment = ""
@@ -205,11 +217,12 @@ def get_color_and_progress(progress: str) -> tuple:
     progress_value = float(progress.replace("Progress:", "").replace("%", "").strip())
     return "orange", progress_value
 
-@st.fragment(run_every="60s")
+@st.cache_data
+@st.fragment(run_every="600s")
 def check_progress_of_all_jobs():
+    start = time.time()
     logging.info("Checking progress of all jobs.")
     topics_dir = "/lustre/work/ws/ws1/tu_zxofv28-my_workspace/"
-    global total_files_b, completed_files_b, pending_jobs_b, topics_progress_b
     topics_progress = {}
     total_files = 0
     completed_files = 0
@@ -253,13 +266,9 @@ def check_progress_of_all_jobs():
                 if jobs_progress:
                     topics_progress[topic_name] = (jobs_progress, topic_path)
     topics_progress = dict(sorted(topics_progress.items(), key=lambda x: x[0]))
-    if topics_progress_b != topics_progress or pending_jobs_b != pending_jobs or total_files_b != total_files or completed_files_b != completed_files:
-        topics_progress_b = topics_progress
-        pending_jobs_b = pending_jobs
-        total_files_b = total_files
-        completed_files_b = completed_files
     update_dashboard(topics_progress, total_files, completed_files, pending_jobs)
     logging.info("Finished checking progress of all jobs.")
+    logging.info(f"Time taken to check progress of all jobs: {time.time() - start:.6f} seconds.")
 
 def energy_extraction(context):
     matches = list(re.finditer(r"FINAL SINGLE POINT ENERGY \s+([-+]?\d+\.\d+)", context))
@@ -267,6 +276,8 @@ def energy_extraction(context):
         return None
     return float(matches[-1].group(1))
 
+@st.cache_data
+@track_time
 def update_dashboard(topics_progress, total_files, completed_files, pending_jobs):
     logging.info("Updating dashboard.")
     st.title('ORCA-Status')
@@ -317,13 +328,7 @@ def update_dashboard(topics_progress, total_files, completed_files, pending_jobs
 
                 col = cols[i % num_columns]
                 with col:
-                    if color == "red" or color == "grey":
-                        st.text(f"{subfolder_name}:\n{progress}\nNo Time")
-                    else:
-                        if runtime:
-                            st.text(f"{subfolder_name}:\n{progress_value}%\n{runtime}")
-                        else:
-                            st.text(f"{subfolder_name}:\n{progress_value}%\nNo Time")
+                    st.text(f"{subfolder_name}:\n{progress_value}%\n{runtime if runtime else 'No Time'}")
                     st.markdown(f"<div style='background-color: {color}; height: 10px; width: {progress_value}%'></div>", unsafe_allow_html=True)
 
             st.text(f"Fortschritt des Topics: {completed_jobs}/{total_jobs} abgeschlossen")
