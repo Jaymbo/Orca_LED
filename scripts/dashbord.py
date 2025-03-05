@@ -85,6 +85,7 @@ def sanitize_saving(content: list[str], name: str):
     return paths
 
 @track_time
+@st.fragment(run_every="600s")
 def upload_file_and_start_calculation():
     config = FragmentConfig()
     default_fragment = ""
@@ -217,7 +218,6 @@ def get_color_and_progress(progress: str) -> tuple:
     progress_value = float(progress.replace("Progress:", "").replace("%", "").strip())
     return "orange", progress_value
 
-@st.cache_data
 @st.fragment(run_every="600s")
 def check_progress_of_all_jobs():
     start = time.time()
@@ -276,7 +276,6 @@ def energy_extraction(context):
         return None
     return float(matches[-1].group(1))
 
-@st.cache_data
 @track_time
 def update_dashboard(topics_progress, total_files, completed_files, pending_jobs):
     logging.info("Updating dashboard.")

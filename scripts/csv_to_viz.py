@@ -20,16 +20,11 @@ def track_time(func):
 def extract(folder, ligand=False):
     viz_file = f"{folder}/viz.py"
     xyz_file = f"{folder}/{os.path.basename(folder)}.xyz"
-    if not os.path.exists(viz_file):
+    if os.path.exists(viz_file):
         print(f"File {viz_file} does not exist.")
         return
     if not os.path.exists(xyz_file):
         print(f"File {xyz_file} does not exist.")
-        return 
-    xlsx_time = os.path.getmtime(viz_file)
-    xyz_time = os.path.getmtime(xyz_file)
-    if xlsx_time < xyz_time:
-        print(f"File {viz_file} is older than {xyz_file}.")
         return
     bindungen, werte = fetch_data(folder)
     if bindungen is None and werte is None:

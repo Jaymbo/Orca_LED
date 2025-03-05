@@ -100,6 +100,27 @@ end"""
             inp_content = inp_content.replace(" LED", "")
         return inp_content
 
+    def fragment_cleaning(self, xyz_file, fragment_groups):
+        """
+        sortiert fragmente so das elemente mit doppelten buchstaben in den einstellungen fragmenten ist
+        """
+        if len(fragment_groups) < 10:
+            return
+
+        atom_names = []
+        with open(xyz_file, "r") as file:
+            lines = file.readlines()[2:]
+            atom_names = [line.split()[0] for line in lines]
+
+        for i, atom in enumerate(atom_names):
+            if len(atom) > 1:
+                for j, fragment in enumerate(fragment_groups):
+                    for atom in fragment:
+                        if atom == i:
+                            fragment_groups.insert(0, fragment_groups.pop(j))
+                            break
+        return fragment_groups
+    
     @track_time
     def create_inp_files(self):
         logging.info("Creating ORCA input files")
@@ -127,7 +148,7 @@ end"""
             path = Database.process_candidate(Path(xyz_file_i.split(".")[0]))
             if path:
                 self.create_single_inp_file(path, Path(path).parents[1], self.frag_len, i, fragment_lines, led)
-                sh_path = ShellScriptCreator.single_sh_script_erstellen(path, Path(path).parents[1], i, self.frag_len, ind, time="2:00:00", mem=20, main=self.fragments != "-1")
+                sh_path = ShellScriptCreator.single_sh_script_erstellen(path, Path(path).parents[1], i, self.frag_len, ind, main=self.fragments != "-1")
                 subprocess.run(["sbatch", sh_path])
             led = False
 
@@ -135,7 +156,7 @@ end"""
     def handle_fragments(self):
         logging.info("Handling fragments")
         fragment_groups = self.parse_fragments(self.fragments)
-
+        fragment_groups = self.fragment_cleaning(self.xyz_file, fragment_groups)
         self.calculate_frag_len(fragment_groups)
 
         xyz_handler = XYZFileHandler(self.xyz_file)
@@ -235,7 +256,7 @@ $orca $workspace_directory/$name/$name.inp > $workspace_directory/$name/$name.ou
         total_path = base / f"{name}/{name}.sh"
         if i == index_compound and main:
             script_content = ShellScriptCreator(
-                int(mem * 8 * frag_len[i] / 48), frag_len[i], time2, path, name, base, scrap, main
+                int(mem * 4 * frag_len[i] / 48), frag_len[i], time2, path, name, base, scrap, main
             ).create_sh_script_content()
         else:
             script_content = ShellScriptCreator(
