@@ -140,7 +140,7 @@ end"""
 
         ind, led = 0, False
         for i, xyz_file_i in enumerate(xyz_files):
-            sum_atoms = min(len(open(self.file).read().split("\n")) - 2, 48) if os.path.basename(self.xyz_file).split(".")[0] == os.path.basename(xyz_file_i).split(".")[0] else None
+            sum_atoms = min(len(open(self.file).read().strip().split("\n")) - 2, 48) if os.path.basename(self.xyz_file).split(".")[0] == os.path.basename(xyz_file_i).split(".")[0] else None
             if sum_atoms:
                 self.frag_len.insert(i, sum_atoms)
                 ind, led = i, True
@@ -149,7 +149,7 @@ end"""
             if path:
                 self.create_single_inp_file(path, Path(path).parents[1], self.frag_len, i, fragment_lines, led)
                 sh_path = ShellScriptCreator.single_sh_script_erstellen(path, Path(path).parents[1], i, self.frag_len, ind, main=self.fragments != "-1")
-                subprocess.run(["sbatch", sh_path])
+                # subprocess.run(["sbatch", sh_path])
             led = False
 
     @track_time

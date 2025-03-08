@@ -81,6 +81,7 @@ def extract(folder, ligand=False):
             bind.append(closest_pair)
 
     bind = np.array(bind)
+    print(f"{bind=}")
     pymolviz.Lines(bind, name="Lines", transparency=werte, color=col).write(f"{folder}/viz.py")
 
 def fetch_data(folder):

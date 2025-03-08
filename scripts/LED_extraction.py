@@ -67,8 +67,6 @@ def extract_LED_energy(base):
     engine_LED_N_body(main_filenames=filepaths, 
                         alternative_filenames=alternative_filenames, 
                         conversion_factor=conversion_factor,
-                        relabel_mapping=relabel_mapping,
                         method=method,
-                        use_ref_as_rhf_in_hfld=use_ref_as_rhf_in_hfld,
                         LEDAW_output_path=LEDAW_output_path)
     print("LED engine execution completed successfully.")

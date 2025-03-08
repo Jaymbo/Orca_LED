@@ -106,7 +106,7 @@ def upload_file_and_start_calculation():
                 file_paths.append(handle_file_upload(f))
         visualize_xyz(file_paths)
 
-    fragment_input = st.text_input("Fragmentierungsangabe", value=default_fragment)
+    fragment_input = st.text_input(f"Fragmentierungsangabe , fragmentierungs trennung - fragmentierung von bis # subsystem trennzeichen)", value=default_fragment)
     header_input = st.text_area("Zusätzliche Header-Einstellungen für die .inp-Datei (optional)", """! DLPNO-CCSD(T) def2-svp def2-svp/C DEF2/J RIJCOSX tightSCF normalPNO LED
 
 %maxcore 160000
@@ -305,9 +305,9 @@ def update_dashboard(topics_progress, total_files, completed_files, pending_jobs
             for i in range(completed_jobs):
                 energy -= jobs[list(jobs.keys())[i]][3]
             st.text(f"{energy * 627.509474:.6f} kcal/mol")
-            extract_LED_energy(folder)
-            extract(folder)
-            visualize_in_3Dmol(Path(folder), Path(folder) / "viz.py")
+            # extract_LED_energy(folder)
+            # extract(folder)
+            # visualize_in_3Dmol(Path(folder), Path(folder) / "viz.py")
 
             st.text(f"Alle Berechnungen abgeschlossen!")
             logging.info(f"All calculations completed for topic: {topic}")

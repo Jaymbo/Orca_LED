@@ -118,13 +118,25 @@ class Database:
         if not matched:
             return matched, False
         fragments = self.right_fragmentation(header_str, None)
+        header_header = "".join(char for char in header_str.split("*xyzfile")[0].strip() if char.isalnum())
+
+        def check_header(folder):
+            xyz_path = self.base / folder / f"{folder}.xyz"
+            with xyz_path.open("r") as f:
+                content = f.read()
+            return "".join(char for char in content.split("*xyzfile")[0].strip() if char.isalnum()) == header_header
 
         def compute_rmsd_and_col(folder):
             xyz_path = self.base / folder / f"{folder}.xyz"
             with xyz_path.open("r") as f:
                 content = f.read()
             return self.rmsd(candidate_xyz, content)
-
+        print("Matched:")
+        print(matched)
+        matched = [folder for folder in matched if check_header(folder)]
+        print(matched)
+        if not matched:
+            return matched, False
         results = [compute_rmsd_and_col(folder) for folder in matched]
         rmsd_list = np.array([result[0] for result in results], dtype=float)
         col_ind = [result[1] for result in results]
