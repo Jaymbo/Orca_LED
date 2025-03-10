@@ -2,40 +2,41 @@ import pymolviz
 import numpy as np
 import os
 import glob
-import csv
+import pandas as pd
+import logging
+import time
 
-def extrakt(folder, part=6, ligand=False):
-    dateiname = str(folder) + "/daten.csv"
-    bindungen = []
-    werte = []
-    
-    if not os.path.exists(dateiname):
+def track_time(func):
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        logging.info(f"Function '{func.__name__}' took {elapsed_time:.2f} seconds to complete.")
+        return result
+    return wrapper
+
+@track_time
+def extract(folder, ligand=False):
+    viz_file = f"{folder}/viz.py"
+    xyz_file = f"{folder}/{os.path.basename(folder)}.xyz"
+    if os.path.exists(viz_file):
+        print(f"File {viz_file} does not exist.")
+        return
+    if not os.path.exists(xyz_file):
+        print(f"File {xyz_file} does not exist.")
+        return
+    bindungen, werte = fetch_data(folder)
+    if bindungen is None and werte is None:
         return
 
-    with open(dateiname, newline='', encoding='utf-8') as csvfile:
-        reader = csv.reader(csvfile, delimiter=';')
-        headers = next(reader)
-        bindungen = [header.split("-") for header in headers[1:]]
-        for row in reader:
-            werte.append(row[1:])
-
-    werte = np.array(werte[part], dtype=str)
-    werte = np.array([float(w.replace(",", ".")) for w in werte])
-    bindungen = np.array(bindungen)
-
     if ligand:
-        mask = (np.array([int(b[0]) for b in bindungen]) == 1)
-        bindungen_new = bindungen[mask]
-        werte_new = werte[mask].astype(float)
-
-        mask = (np.array([int(b[0]) for b in bindungen]) == 1)
-        bindungen = np.concatenate((bindungen_new, bindungen[mask]))
-        werte = np.concatenate((werte_new, werte[mask].astype(float)))
+        mask = (np.array([int(b[0]) for b in bindungen]) == 6)
+        bindungen = bindungen[mask]
+        werte = werte[mask].astype(float)
 
     mi = np.min(werte)
-    ma = np.max(werte)
-    if -mi > ma:
-        ma = -mi
+    ma = max(np.abs(mi), np.max(werte))
 
     mask_less0 = werte < 0
     mask_greater0 = werte > 0
@@ -60,10 +61,8 @@ def extrakt(folder, part=6, ligand=False):
     for number in fragment_numbers:
         xyz_file = os.path.join(folder, f"fragment_{str(number).zfill(3)}.xyz")
         if os.path.exists(xyz_file):
-            with open(xyz_file, newline='', encoding='utf-8') as xyzfile:
-                lines = xyzfile.readlines()[2:]  # Erste zwei Zeilen überspringen
-                coordinates = np.array([list(map(float, line.split()[1:4])) for line in lines])
-                mean_coordinates_dict[number] = coordinates  # Speichert alle Koordinaten des Fragments
+            coordinates = pd.read_csv(xyz_file, sep='\s+', skiprows=2, usecols=[1, 2, 3], header=None).values
+            mean_coordinates_dict[number] = coordinates
 
     bind = []
 
@@ -82,4 +81,28 @@ def extrakt(folder, part=6, ligand=False):
             bind.append(closest_pair)
 
     bind = np.array(bind)
+    print(f"{bind=}")
     pymolviz.Lines(bind, name="Lines", transparency=werte, color=col).write(f"{folder}/viz.py")
+
+def fetch_data(folder):
+    """
+    zieht daten aus der exel datei und speichert sie entsprechnet in bindungen und werte
+    """
+    dateiname = str(folder) + "/Summary_fp-LED_matrices.xlsx"
+    bindungen = []
+    werte = []
+    
+    if not os.path.exists(dateiname):
+        return bindungen, werte
+
+    # read xlsx file and get the data
+    data = pd.read_excel(dateiname, sheet_name="TOTAL").values.T.tolist()
+    for i, row in enumerate(data):
+        for j, value in enumerate(row):
+            if i <= j+1:
+                continue
+            bindungen.append([j+1, i])
+            werte.append(str(value))
+    werte = np.array([float(w.replace(",", ".")) for w in werte])
+    bindungen = np.array(bindungen)
+    return bindungen, werte

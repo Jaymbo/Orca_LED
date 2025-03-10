@@ -4,13 +4,13 @@ import streamlit as st
 from pathlib import Path
 import pipeline
 from LED_extraction import extract_LED_energy
-from csv_to_viz import extrakt
+from csv_to_viz import extract
 from visualization import MoleculeVisualizer
 from config_manager import FragmentConfig
 import logging
 from logging.handlers import RotatingFileHandler
+import time
 
-topics_progress_b, total_files_b, completed_files_b, pending_jobs_b = {}, 0, 0, []
 
 def setup_logging():
     log_format = '%(asctime)s - %(levelname)s - %(message)s'
@@ -31,6 +31,17 @@ def setup_logging():
         datefmt='%Y-%m-%d %H:%M:%S'
     )
 
+def track_time(func):
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        logging.info(f"Function '{func.__name__}' took {elapsed_time:.4f} seconds to complete.")
+        return result
+    return wrapper
+
+@track_time
 def visualize_xyz(molecule_path: Path):
     viewer = MoleculeVisualizer.render_xyz(molecule_path)
     st.session_state.previous_xyz = viewer  # Nur wenn benötigt
@@ -73,6 +84,8 @@ def sanitize_saving(content: list[str], name: str):
         paths.append(save_path)
     return paths
 
+@track_time
+@st.fragment(run_every="600s")
 def upload_file_and_start_calculation():
     config = FragmentConfig()
     default_fragment = ""
@@ -93,7 +106,7 @@ def upload_file_and_start_calculation():
                 file_paths.append(handle_file_upload(f))
         visualize_xyz(file_paths)
 
-    fragment_input = st.text_input("Fragmentierungsangabe", value=default_fragment)
+    fragment_input = st.text_input(f"Fragmentierungsangabe , fragmentierungs trennung - fragmentierung von bis # subsystem trennzeichen)", value=default_fragment)
     header_input = st.text_area("Zusätzliche Header-Einstellungen für die .inp-Datei (optional)", """! DLPNO-CCSD(T) def2-svp def2-svp/C DEF2/J RIJCOSX tightSCF normalPNO LED
 
 %maxcore 160000
@@ -109,7 +122,6 @@ end""")
                 st.info("Die Berechnung wurde in auftrag gegeben...")
                 pipeline.ORCAInputFileCreator(str(file_paths[i]), fragment_input, header_input).create_inp_files()
                 st.info("Die Berechnung wurde vorbereitet.")
-                logging.info(f"Calculation started for file: {file.name}")
         else:
             st.error("Bitte wählen Sie eine Datei aus.")
             logging.warning("No file selected for calculation.")
@@ -120,8 +132,6 @@ def check_orca_termination(content):
 def get_progress_of_job(output, path):
     runtime = None
     error_status = get_error_file(path)
-    if error_status is not None:
-        return error_status, None
     
     status, runtime = check_slurm_job_status_and_duration(path)
     if status != "Not Finished":
@@ -129,6 +139,9 @@ def get_progress_of_job(output, path):
 
     if check_orca_termination(output):
         return "Progress: 100%", runtime
+    
+    if error_status is not None:
+        return error_status, None
     count = 0
     output = output.split("\n")
     if "INITIAL GUESS DONE" in output:
@@ -205,11 +218,11 @@ def get_color_and_progress(progress: str) -> tuple:
     progress_value = float(progress.replace("Progress:", "").replace("%", "").strip())
     return "orange", progress_value
 
-@st.fragment(run_every="60s")
+@st.fragment(run_every="600s")
 def check_progress_of_all_jobs():
+    start = time.time()
     logging.info("Checking progress of all jobs.")
     topics_dir = "/lustre/work/ws/ws1/tu_zxofv28-my_workspace/"
-    global total_files_b, completed_files_b, pending_jobs_b, topics_progress_b
     topics_progress = {}
     total_files = 0
     completed_files = 0
@@ -222,10 +235,14 @@ def check_progress_of_all_jobs():
                 [f for f in topic_path.iterdir() if f.is_dir()],
                 key=lambda x: ("fragment_" in x.name, x.name)
             )
+            subfolders = sorted(
+                [f for f in topic_path.iterdir() if f.is_dir()],
+                key=lambda x: ("subsys_" in x.name, x.name)
+            )
 
             check = False
             for folder in subfolders:
-                if folder.name.startswith("fragment_"):
+                if folder.name.startswith("fragment_") or folder.name.startswith("subsys_"):
                     check = True
                     break
 
@@ -253,13 +270,9 @@ def check_progress_of_all_jobs():
                 if jobs_progress:
                     topics_progress[topic_name] = (jobs_progress, topic_path)
     topics_progress = dict(sorted(topics_progress.items(), key=lambda x: x[0]))
-    if topics_progress_b != topics_progress or pending_jobs_b != pending_jobs or total_files_b != total_files or completed_files_b != completed_files:
-        topics_progress_b = topics_progress
-        pending_jobs_b = pending_jobs
-        total_files_b = total_files
-        completed_files_b = completed_files
     update_dashboard(topics_progress, total_files, completed_files, pending_jobs)
     logging.info("Finished checking progress of all jobs.")
+    logging.info(f"Time taken to check progress of all jobs: {time.time() - start:.6f} seconds.")
 
 def energy_extraction(context):
     matches = list(re.finditer(r"FINAL SINGLE POINT ENERGY \s+([-+]?\d+\.\d+)", context))
@@ -267,6 +280,7 @@ def energy_extraction(context):
         return None
     return float(matches[-1].group(1))
 
+@track_time
 def update_dashboard(topics_progress, total_files, completed_files, pending_jobs):
     logging.info("Updating dashboard.")
     st.title('ORCA-Status')
@@ -294,9 +308,9 @@ def update_dashboard(topics_progress, total_files, completed_files, pending_jobs
             energy = 2 * jobs[list(jobs.keys())[0]][3]
             for i in range(completed_jobs):
                 energy -= jobs[list(jobs.keys())[i]][3]
-            st.text(f"{energy * 627.509474:.2f} kcal/mol")
+            st.text(f"{energy * 627.509474:.6f} kcal/mol")
             extract_LED_energy(folder)
-            extrakt(folder)
+            extract(folder)
             visualize_in_3Dmol(Path(folder), Path(folder) / "viz.py")
 
             st.text(f"Alle Berechnungen abgeschlossen!")
@@ -317,13 +331,7 @@ def update_dashboard(topics_progress, total_files, completed_files, pending_jobs
 
                 col = cols[i % num_columns]
                 with col:
-                    if color == "red" or color == "grey":
-                        st.text(f"{subfolder_name}:\n{progress}\nNo Time")
-                    else:
-                        if runtime:
-                            st.text(f"{subfolder_name}:\n{progress_value}%\n{runtime}")
-                        else:
-                            st.text(f"{subfolder_name}:\n{progress_value}%\nNo Time")
+                    st.text(f"{subfolder_name}:\n{progress_value}%\n{runtime if runtime else 'No Time'}")
                     st.markdown(f"<div style='background-color: {color}; height: 10px; width: {progress_value}%'></div>", unsafe_allow_html=True)
 
             st.text(f"Fortschritt des Topics: {completed_jobs}/{total_jobs} abgeschlossen")

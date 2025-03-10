@@ -92,16 +92,16 @@ class MoleculeVisualizer:
                             int(float(parts[13]) * 255)
                         )
                         alpha = float(parts[1])
-                        
-                        viewer.addCylinder({
-                            "start": {"x": x1, "y": y1, "z": z1},
-                            "end": {"x": x2, "y": y2, "z": z2},
-                            "radius": radius,
-                            "color": f"rgb({color[0]},{color[1]},{color[2]})",
-                            "fromCap": 1,
-                            "toCap": 1,
-                            "opacity": alpha
-                        })
+                        if alpha > 0.25:
+                            viewer.addCylinder({
+                                "start": {"x": x1, "y": y1, "z": z1},
+                                "end": {"x": x2, "y": y2, "z": z2},
+                                "radius": radius,
+                                "color": f"rgb({color[0]},{color[1]},{color[2]})",
+                                "fromCap": 1,
+                                "toCap": 1,
+                                "opacity": alpha
+                            })
 
     @staticmethod
     def convert_sdf_to_mol2(

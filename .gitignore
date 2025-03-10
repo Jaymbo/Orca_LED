@@ -1,0 +1,9 @@
+# Ignore all files and directories
+*
+
+acept
+!/.gitignore
+!/scripts
+!/scripts/*
+!/tests/*
+!/tests
