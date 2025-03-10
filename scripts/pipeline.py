@@ -134,6 +134,8 @@ end"""
         fragment_lines = self.handle_fragments() if self.fragments != "-1" else None
 
         xyz_files = sorted(glob.glob(os.path.join(self.xyz_folder, "*.xyz")))
+        # alle xyz dateien aussortieren die fragment im namen haben
+        xyz_files = [i for i in xyz_files if "fragment" not in i]
         if not xyz_files:
             logging.warning("No .xyz files found in the specified folder.")
             return
@@ -155,12 +157,15 @@ end"""
     @track_time
     def handle_fragments(self):
         logging.info("Handling fragments")
-        fragment_groups = self.parse_fragments(self.fragments)
-        fragment_groups = self.fragment_cleaning(self.xyz_file, fragment_groups)
-        self.calculate_frag_len(fragment_groups)
+        subsys_groups = self.parse_fragments(self.fragments)
+        all_fragment_lines = []
+        for fragment_groups in subsys_groups:
+            fragment_groups = self.fragment_cleaning(self.xyz_file, fragment_groups)
+            all_fragment_lines.extend(self.create_fragment_lines(fragment_groups))
+            self.calculate_frag_len(fragment_groups)
 
-        xyz_handler = XYZFileHandler(self.xyz_file)
-        xyz_handler.split_xyz(fragment_groups, self.xyz_folder)
+            xyz_handler = XYZFileHandler(self.xyz_file)
+            xyz_handler.split_xyz(fragment_groups, self.xyz_folder)
 
         fragment_lines = self.create_fragment_lines(fragment_groups)
         return fragment_lines
@@ -168,17 +173,24 @@ end"""
     @track_time
     def parse_fragments(self, fragments):
         logging.info("Parsing fragments")
-        fragment_groups = []
-        for fragment in fragments.split(","):
-            fragment_indices = []
-            for part in fragment.split():
-                if "-" in part:
-                    start, end = map(int, part.split("-"))
-                    fragment_indices.extend(range(start-1, end))
-                else:
-                    fragment_indices.append(int(part)-1)
-            fragment_groups.append(fragment_indices)
-        return fragment_groups
+        subsys_groups = []
+        supersys = []
+        for subsys in fragments.split("#"):
+            fragment_groups = []
+            for fragment in subsys.split(","):
+                fragment_indices = []
+                for part in fragment.split():
+                    if "-" in part:
+                        start, end = map(int, part.split("-"))
+                        fragment_indices.extend(range(start-1, end))
+                    else:
+                        fragment_indices.append(int(part)-1)
+                fragment_groups.append(fragment_indices)
+            if fragment_groups:
+                subsys_groups.append(fragment_groups)
+                supersys.extend(fragment_groups)
+        subsys_groups.append(supersys)
+        return subsys_groups
 
     @track_time
     def create_fragment_lines(self, fragment_groups):
@@ -207,10 +219,10 @@ end"""
         return inp_path
 
     @track_time
-    def calculate_frag_len(self, fragment_groups):
+    def calculate_frag_len(self, subsys_groups):
         logging.info("Calculating fragment lengths")
-        self.frag_len = [min(len(group), 48) for group in fragment_groups]
-
+        for fragments_group in subsys_groups:
+            self.frag_len.append(min(sum(len(group) for group in fragments_group), 48))
 
 class ShellScriptCreator:
     def __init__(self, mem, nprocs, time, path, name, base, scrap=None, main=False):
