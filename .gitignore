@@ -5,3 +5,5 @@ acept
 !/.gitignore
 !/scripts
 !/scripts/*
+!/tests/*
+!/tests

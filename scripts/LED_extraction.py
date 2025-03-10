@@ -37,6 +37,7 @@ def extract_LED_energy(base):
     base_path = Path(base)
     dateinamen = [folder for folder in base_path.iterdir() if folder.is_dir()]
     dateinamen.sort(key=lambda x: (x.name.startswith('fragment_'), x.name))
+    dateinamen.sort(key=lambda x: (x.name.startswith('subsys_'), x.name))
     
     filepaths = [str(folder / f"{folder.name}.out") for folder in dateinamen]
     

@@ -92,7 +92,7 @@ class MoleculeVisualizer:
                             int(float(parts[13]) * 255)
                         )
                         alpha = float(parts[1])
-                        if alpha > 0.05:
+                        if alpha > 0.25:
                             viewer.addCylinder({
                                 "start": {"x": x1, "y": y1, "z": z1},
                                 "end": {"x": x2, "y": y2, "z": z2},

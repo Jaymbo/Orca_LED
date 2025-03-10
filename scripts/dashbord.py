@@ -235,10 +235,14 @@ def check_progress_of_all_jobs():
                 [f for f in topic_path.iterdir() if f.is_dir()],
                 key=lambda x: ("fragment_" in x.name, x.name)
             )
+            subfolders = sorted(
+                [f for f in topic_path.iterdir() if f.is_dir()],
+                key=lambda x: ("subsys_" in x.name, x.name)
+            )
 
             check = False
             for folder in subfolders:
-                if folder.name.startswith("fragment_"):
+                if folder.name.startswith("fragment_") or folder.name.startswith("subsys_"):
                     check = True
                     break
 
@@ -305,9 +309,9 @@ def update_dashboard(topics_progress, total_files, completed_files, pending_jobs
             for i in range(completed_jobs):
                 energy -= jobs[list(jobs.keys())[i]][3]
             st.text(f"{energy * 627.509474:.6f} kcal/mol")
-            # extract_LED_energy(folder)
-            # extract(folder)
-            # visualize_in_3Dmol(Path(folder), Path(folder) / "viz.py")
+            extract_LED_energy(folder)
+            extract(folder)
+            visualize_in_3Dmol(Path(folder), Path(folder) / "viz.py")
 
             st.text(f"Alle Berechnungen abgeschlossen!")
             logging.info(f"All calculations completed for topic: {topic}")
