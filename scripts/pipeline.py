@@ -45,11 +45,11 @@ class XYZFileHandler:
             output_file.writelines(fragment_atoms)
 
     @track_time
-    def split_xyz(self, fragments_list, output_prefix):
+    def split_xyz(self, fragments_list, output_prefix, name="fragment"):
         logging.info(f"Splitting XYZ file into fragments with prefix: {output_prefix}")
         for i, fragment_indices in enumerate(fragments_list):
             fragment_atoms = [self.atom_data[idx] for idx in fragment_indices]
-            output_filename = f"{output_prefix}/fragment_{i + 1:03}.xyz"
+            output_filename = f"{output_prefix}/{name}_{i + 1:03}.xyz"
             self.write_fragment_xyz(fragment_atoms, output_filename)
 
 
@@ -92,12 +92,9 @@ end"""
         self.frag_len = []
         logging.info(f"Initialized ORCAInputFileCreator with file: {file}")
 
-    def create_inp_file_content(self, charge, npros, xyz_file, fragment_lines=None):
+    def create_inp_file_content(self, charge, npros, xyz_file, fragment_lines):
         inp_content = f"{self.header}{npros}\nend\n*XYZfile {charge} 1 {xyz_file}\n\n"
-        if fragment_lines:
-            inp_content += "".join(fragment_lines)
-        else:
-            inp_content = inp_content.replace(" LED", "")
+        inp_content += "".join(fragment_lines)
         return inp_content
 
     def fragment_cleaning(self, xyz_file, fragment_groups):
@@ -136,38 +133,44 @@ end"""
         xyz_files = sorted(glob.glob(os.path.join(self.xyz_folder, "*.xyz")))
         # alle xyz dateien aussortieren die fragment im namen haben
         xyz_files = [i for i in xyz_files if "fragment" not in i]
+        xyz_files.sort(key=lambda x: (x.startswith('subsys_'), x))
         if not xyz_files:
             logging.warning("No .xyz files found in the specified folder.")
             return
 
-        ind, led = 0, False
+        ind = 0
         for i, xyz_file_i in enumerate(xyz_files):
-            sum_atoms = min(len(open(self.file).read().strip().split("\n")) - 2, 48) if os.path.basename(self.xyz_file).split(".")[0] == os.path.basename(xyz_file_i).split(".")[0] else None
-            if sum_atoms:
-                self.frag_len.insert(i, sum_atoms)
-                ind, led = i, True
-            self.create_single_inp_file(xyz_file_i, Path(xyz_file_i).parent, self.frag_len, i, fragment_lines, led)
+            if os.path.basename(self.xyz_file).split(".")[0] == os.path.basename(xyz_file_i).split(".")[0]:
+                ind = -1
+            else:
+                ind = i
+            self.create_single_inp_file(xyz_file_i, Path(xyz_file_i).parent, self.frag_len[ind], fragment_lines[ind])
             path = Database.process_candidate(Path(xyz_file_i.split(".")[0]))
             if path:
-                self.create_single_inp_file(path, Path(path).parents[1], self.frag_len, i, fragment_lines, led)
-                sh_path = ShellScriptCreator.single_sh_script_erstellen(path, Path(path).parents[1], i, self.frag_len, ind, main=self.fragments != "-1")
-                # subprocess.run(["sbatch", sh_path])
-            led = False
+                self.create_single_inp_file(path, Path(path).parents[1], self.frag_len[ind], fragment_lines[ind])
+                sh_path = ShellScriptCreator.single_sh_script_erstellen(path, Path(path).parents[1], ind, self.frag_len[ind])
+                subprocess.run(["sbatch", sh_path])
 
     @track_time
     def handle_fragments(self):
         logging.info("Handling fragments")
         subsys_groups = self.parse_fragments(self.fragments)
-        all_fragment_lines = []
+        self.calculate_frag_len(subsys_groups)
         for fragment_groups in subsys_groups:
             fragment_groups = self.fragment_cleaning(self.xyz_file, fragment_groups)
-            all_fragment_lines.extend(self.create_fragment_lines(fragment_groups))
-            self.calculate_frag_len(fragment_groups)
 
             xyz_handler = XYZFileHandler(self.xyz_file)
-            xyz_handler.split_xyz(fragment_groups, self.xyz_folder)
+        frag_list = []
+        for groups in subsys_groups[:-1]:
+            group_list = []
+            for group in groups:
+                group_list.extend(group)
+            frag_list.append(group_list)
+        xyz_handler.split_xyz(subsys_groups[-1], self.xyz_folder)
+        xyz_handler.split_xyz(frag_list, self.xyz_folder, name="subsys")
 
-        fragment_lines = self.create_fragment_lines(fragment_groups)
+
+        fragment_lines = [self.create_fragment_lines(groups) for groups in subsys_groups]
         return fragment_lines
 
     @track_time
@@ -196,18 +199,24 @@ end"""
     def create_fragment_lines(self, fragment_groups):
         logging.info("Creating fragment lines")
         fragment_lines = ["%geom\n Fragments\n"]
+        all = []
+        for group in fragment_groups:
+            all.extend(group)
+        all_sorted = sorted(all)
+        index_mapping = {old_index: new_index for new_index, old_index in enumerate(all_sorted)}
         for i, group in enumerate(fragment_groups, start=1):
+            group = [index_mapping[old_index] for old_index in group]
             fragment_atoms = " ".join(map(str, group))
             fragment_lines.append(f"  {i} {{{fragment_atoms}}} end\n")
         fragment_lines.append(" end\nend\n")
+        print(fragment_lines)
         return fragment_lines
 
     @track_time
-    def create_single_inp_file(self, xyz_file_i, base, frag_len, i, fragment_lines, led=False):
+    def create_single_inp_file(self, xyz_file_i, base, frag_len, fragment_line):
         logging.info(f"Creating single ORCA input file for: {xyz_file_i}")
         charge = ChargeCalculator.calculate_charge(self.file if os.path.basename(self.xyz_file).split(".")[0] == os.path.basename(xyz_file_i).split(".")[0] else xyz_file_i)
-        inp_content = self.create_inp_file_content(charge, frag_len[i], xyz_file_i, fragment_lines if led else None)
-        
+        inp_content = self.create_inp_file_content(charge, frag_len, xyz_file_i, fragment_line)
         base_name = os.path.splitext(os.path.basename(xyz_file_i))[0]
         base_path = base / base_name
         inp_path = base_path / f"{base_name}.inp"
@@ -225,15 +234,13 @@ end"""
             self.frag_len.append(min(sum(len(group) for group in fragments_group), 48))
 
 class ShellScriptCreator:
-    def __init__(self, mem, nprocs, time, path, name, base, scrap=None, main=False):
+    def __init__(self, mem, nprocs, time, path, name, base):
         self.mem = mem
         self.nprocs = nprocs
         self.time = time
         self.path = path.split(".")[0]
         self.name = name
         self.base = base
-        self.scrap = scrap
-        self.main = main
         logging.info(f"Initialized ShellScriptCreator for: {name}")
 
     @track_time
@@ -263,17 +270,12 @@ $orca $workspace_directory/$name/$name.inp > $workspace_directory/$name/$name.ou
         return script_content
 
     @staticmethod
-    def single_sh_script_erstellen(path, base, i, frag_len, index_compound, time="04:00:00", time2="20:00:00", mem=180, scrap=700, main=True):
+    def single_sh_script_erstellen(path, base, i, frag_len, time="20:00:00", mem=720):
         name = Path(path).stem
         total_path = base / f"{name}/{name}.sh"
-        if i == index_compound and main:
-            script_content = ShellScriptCreator(
-                int(mem * 4 * frag_len[i] / 48), frag_len[i], time2, path, name, base, scrap, main
-            ).create_sh_script_content()
-        else:
-            script_content = ShellScriptCreator(
-                int(mem * frag_len[i] / 48), frag_len[i], time, path, name, base
-            ).create_sh_script_content()
+        script_content = ShellScriptCreator(
+            int(mem * frag_len / 48), frag_len, time, path, name, base
+        ).create_sh_script_content()
         with open(total_path, "w") as file:
             file.write(script_content)
         return total_path
@@ -371,3 +373,15 @@ class FragmentExtractor:
                         indexeses += f"{fragment_atom.index} "
         indexeses = indexeses[1:]
         return indexeses
+
+if __name__ == "__main__":
+    file = "/lustre/work/ws/ws1/tu_zxofv28-my_workspace/test8/test8.xyz"
+    fragment_input = "1,2,3,4,5,6,7,8,9,10,11,12#13,14,15,16,17,18,19,20,21,22,23,24"
+    header_input = """! DLPNO-CCSD(T1) aug-cc-pVTZ DEFGRID3 RIJCOSX def2/J aug-cc-pVQZ/C verytightscf TightPNO LED
+
+%maxcore 160000
+%scf maxiter 999 end
+%basis auxj "autoaux" auxc "autoaux" autoauxlmax true end
+%mdci TCutPNO 1e-6 printlevel 3 end"""
+    orca_input_creator = ORCAInputFileCreator(str(file), fragment_input, header_input)
+    orca_input_creator.create_inp_files()

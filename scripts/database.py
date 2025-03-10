@@ -118,23 +118,21 @@ class Database:
         if not matched:
             return matched, False
         fragments = self.right_fragmentation(header_str, None)
-        header_header = "".join(char for char in header_str.split("*xyzfile")[0].strip() if char.isalnum())
-
+        header_header = "".join(char for char in header_str.split("*XYZfile")[0].strip() if char.isalnum())
         def check_header(folder):
-            xyz_path = self.base / folder / f"{folder}.xyz"
+            xyz_path = self.base / folder / f"{folder}.inp"
             with xyz_path.open("r") as f:
-                content = f.read()
-            return "".join(char for char in content.split("*xyzfile")[0].strip() if char.isalnum()) == header_header
+                content = "".join(line.strip() for line in f)
+            output = "".join(char for char in content.split("*XYZfile")[0].strip() if char.isalnum())
+            print(output)
+            return output == header_header
 
         def compute_rmsd_and_col(folder):
             xyz_path = self.base / folder / f"{folder}.xyz"
             with xyz_path.open("r") as f:
                 content = f.read()
             return self.rmsd(candidate_xyz, content)
-        print("Matched:")
-        print(matched)
         matched = [folder for folder in matched if check_header(folder)]
-        print(matched)
         if not matched:
             return matched, False
         results = [compute_rmsd_and_col(folder) for folder in matched]
@@ -194,6 +192,7 @@ class Database:
         candidate_xyz = db.get_filecontent()
         atoms = db.atoms_from_filecontent(candidate_xyz)
         header = db.header_from_file()
+        print(header)
         new_dir, new_filepath = db.create_filename(atoms)
         step_end = time.time()
         #logging.info("Step 1: Prepare candidate data - Time taken: %.4f seconds", step_end - step_start)
@@ -228,6 +227,7 @@ class Database:
             
             end_time = time.time()
             logging.info("Total time taken to process candidate: %.4f seconds", end_time - start_time)
+            print(db.header_from_file())
             return None
 
     def add_calculation(self):
