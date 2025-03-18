@@ -5,6 +5,8 @@ acept
 !/.gitignore
 !/scripts
 !/.vscode
+!/tests
 
 !/scripts/*
 !/.vscode/*
+!/tests/*

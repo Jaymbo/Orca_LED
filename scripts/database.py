@@ -7,12 +7,14 @@ from scipy.optimize import linear_sum_assignment
 import time
 import os
 
+BASE_PATH = Path(__file__).resolve().parent.parent
+
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class Database:
     def __init__(self, dir: Path) -> None:
-        self.base = Path("/lustre/work/ws/ws1/tu_zxofv28-my_workspace/database/")
+        self.base = BASE_PATH / "database/"
         self.base.mkdir(parents=True, exist_ok=True)
         self.dir: Path = dir
         self.get_file_paths()
@@ -284,8 +286,7 @@ class Database:
         logging.info("Time taken to clean up: %.2f seconds", end_time - start_time)
 
     def syslink_merge(self, original: Path, merged: Path):
-        dir = Path("/lustre/work/ws/ws1/tu_zxofv28-my_workspace/")
-        for folder in dir.iterdir():
+        for folder in BASE_PATH.iterdir():
             if folder.is_dir():
                 for subfolder in folder.iterdir():
                     if subfolder.is_dir() and any(file.suffix == ".xyz" for file in folder.iterdir()):
@@ -296,8 +297,7 @@ class Database:
 
     def copy_to_db(self):
         start_time = time.time()
-        dir = Path("/lustre/work/ws/ws1/tu_zxofv28-my_workspace/")
-        for folder in dir.iterdir():
+        for folder in BASE_PATH.iterdir():
             if folder.is_dir():
                 for subfolder in folder.iterdir():
                     if subfolder.is_dir() and any(file.suffix == ".xyz" for file in folder.iterdir()):

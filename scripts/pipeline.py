@@ -327,16 +327,3 @@ class FragmentExtractor:
         # erstes , durch # ersetzen
         frag_str = frag_str.replace(',', '#', 1)  # Fixed the variable name from frags to frag_str
         return frag_str
-
-
-if __name__ == "__main__":
-    file = "/lustre/work/ws/ws1/tu_zxofv28-my_workspace/tests/BrBr_HLi.xyz"
-    fragment_input = ""
-    header_input = """! DLPNO-CCSD(T1) aug-cc-pVTZ DEFGRID3 RIJCOSX def2/J aug-cc-pVQZ/C verytightscf TightPNO LED
-
-%maxcore 160000
-%scf maxiter 999 end
-%basis auxj "autoaux" auxc "autoaux" autoauxlmax true end
-%mdci TCutPNO 1e-6 printlevel 3 end"""
-    orca_input_creator = ORCAInputFileCreator(str(file), fragment_input, header_input)
-    orca_input_creator.create_inp_files()

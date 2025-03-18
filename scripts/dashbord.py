@@ -11,10 +11,11 @@ import logging
 from logging.handlers import RotatingFileHandler
 import time
 
+BASE_PATH = Path(__file__).resolve().parent.parent
 
 def setup_logging():
     log_format = '%(asctime)s - %(levelname)s - %(message)s'
-    log_file = Path(__file__).parent / 'logs' / 'app.log'
+    log_file = BASE_PATH / 'logs' / 'app.log'
     
     log_file.parent.mkdir(exist_ok=True)
     
@@ -62,7 +63,7 @@ def handle_file_upload(uploaded_file) -> Path:
         SANITIZE_TABLE = str.maketrans(" ", "_", "!$%&()=+,-/:;<=>?@[\]^`{|}~")
         clean_name = uploaded_file.name.translate(SANITIZE_TABLE)
         name = Path(clean_name).stem
-        save_path = Path(f"/lustre/work/ws/ws1/tu_zxofv28-my_workspace/{name}/{clean_name}")
+        save_path = BASE_PATH / f"{name}/{clean_name}"
         
         save_path.parent.mkdir(parents=True, exist_ok=True)
         save_path.write_bytes(uploaded_file.getbuffer())
@@ -78,7 +79,7 @@ def sanitize_saving(content: list[str], name: str):
     clean_name = name.translate(SANITIZE_TABLE)
     name = Path(clean_name).stem
     for i in range(len(content)):
-        save_path = Path(f"/lustre/work/ws/ws1/tu_zxofv28-my_workspace/{name}_{i+1}/{name}_{i+1}.mol2")
+        save_path = BASE_PATH / f"{name}_{i+1}/{name}_{i+1}.mol2"
         save_path.parent.mkdir(parents=True, exist_ok=True)
         save_path.write_text(content[i])
         paths.append(save_path)
@@ -222,7 +223,7 @@ def get_color_and_progress(progress: str) -> tuple:
 def check_progress_of_all_jobs():
     start = time.time()
     logging.info("Checking progress of all jobs.")
-    topics_dir = "/lustre/work/ws/ws1/tu_zxofv28-my_workspace/"
+    topics_dir = BASE_PATH
     topics_progress = {}
     total_files = 0
     completed_files = 0
