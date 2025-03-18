@@ -46,8 +46,8 @@ def extract_LED_energy(base):
     
     name, content = zip(*results)
     content = [c for c in content if c is not None]
-
-    if not content or " LED " not in content[0]:
+    print(f"len(dateinamen): {len(dateinamen)}"	)
+    if not content or " LED " not in content[0] or len(dateinamen) <= 2:
         print("LED keyword not found in the first file content.")
         return
     
@@ -61,7 +61,7 @@ def extract_LED_energy(base):
         return
     
     method = "DLPNO-CCSD(T)"
-    conversion_factor = 627.5095  # for kj/mol, use: 2625.5
+    conversion_factor = 627.5096080305927  # for kj/mol, use: 2625.5
     alternative_filenames = ['' for _ in range(len(dateinamen))]
     relabel_mapping = [i+1 for i in range(len(dateinamen)-1)]
     use_ref_as_rhf_in_hfld = None

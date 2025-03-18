@@ -4,6 +4,7 @@
 acept
 !/.gitignore
 !/scripts
+!/.vscode
+
 !/scripts/*
-!/tests/*
-!/tests
+!/.vscode/*

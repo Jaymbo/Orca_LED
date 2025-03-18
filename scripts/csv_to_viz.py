@@ -6,17 +6,6 @@ import pandas as pd
 import logging
 import time
 
-def track_time(func):
-    def wrapper(*args, **kwargs):
-        start_time = time.time()
-        result = func(*args, **kwargs)
-        end_time = time.time()
-        elapsed_time = end_time - start_time
-        logging.info(f"Function '{func.__name__}' took {elapsed_time:.2f} seconds to complete.")
-        return result
-    return wrapper
-
-@track_time
 def extract(folder, ligand=False):
     viz_file = f"{folder}/viz.py"
     xyz_file = f"{folder}/{os.path.basename(folder)}.xyz"
@@ -27,7 +16,8 @@ def extract(folder, ligand=False):
         print(f"File {xyz_file} does not exist.")
         return
     bindungen, werte = fetch_data(folder)
-    if bindungen is None and werte is None:
+    if bindungen is None or werte is None or len(bindungen) == 0 or len(werte) == 0 or bindungen.size == 0 or werte.size == 0 :
+        print("No data found.")
         return
 
     if ligand:
