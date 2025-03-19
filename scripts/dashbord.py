@@ -8,29 +8,29 @@ from csv_to_viz import extract
 from visualization import MoleculeVisualizer
 import logging
 
-BASE_PATH = Path(__file__).resolve().parent.parent
+BASE_PATH = Path(Path(__file__).resolve().parent.parent / "calculations")
 
 class FileHandler:
     @staticmethod
-    def handle_file_upload(uploaded_file) -> Path:
+    def handle_file_upload(topic, uploaded_file) -> Path:
         """Verarbeitet hochgeladene Dateien und gibt gespeicherten Pfad zurück"""
         try:
             clean_name = uploaded_file.name.translate(str.maketrans(" ", "_", "!$%&()=+,-/:;<=>?@[\]^`{|}~"))
-            save_path = BASE_PATH / f"{Path(clean_name).stem}/{clean_name}"
+            save_path = BASE_PATH / f"{topic}/{Path(clean_name).stem}/{clean_name}"
             save_path.parent.mkdir(parents=True, exist_ok=True)
             save_path.write_bytes(uploaded_file.getbuffer())
-            logging.info(f"File uploaded: {uploaded_file.name}")
+            logging.info(f"File uploaded: {uploaded_file.name} with topic: {topic}")
             return save_path
         except Exception as e:
             logging.error(f"Upload failed: {str(e)}")
             raise
 
     @staticmethod
-    def sanitize_saving(content: list[str], name: str):
+    def sanitize_saving(topic, content: list[str], name: str):
         paths = []
         clean_name = name.translate(str.maketrans(" ", "_", "!$%&()=+,-/:;<=>?@[\]^`{|}~"))
         for i, text in enumerate(content):
-            save_path = BASE_PATH / f"{Path(clean_name).stem}_{i+1}/{Path(clean_name).stem}_{i+1}.mol2"
+            save_path = BASE_PATH / f"{topic}/{Path(clean_name).stem}_{i+1}/{Path(clean_name).stem}_{i+1}.mol2"
             save_path.parent.mkdir(parents=True, exist_ok=True)
             save_path.write_text(text)
             paths.append(save_path)
@@ -157,87 +157,110 @@ class JobHandler:
 
 class Dashboard:
     @staticmethod
-    def update_dashboard(topics_progress, total_files, completed_files, pending_jobs):
+    def update_dashboard(topics_progress):
         # logging.info("Updating dashboard.")
         st.title('ORCA-Status')
 
-        st.write(f"Gesamtfortschritt: {completed_files} von {total_files} abgeschlossen.")
-        overall_progress = completed_files / total_files if total_files > 0 else 0
-        st.progress(overall_progress)
+        # st.write(f"Gesamtfortschritt: {completed_files} von {total_files} abgeschlossen.")
+        # overall_progress = completed_files / total_files if total_files > 0 else 0
+        # st.progress(overall_progress)
 
-        if pending_jobs:
-            st.subheader("Noch nicht abgeschlossene Jobs:")
-            for job in pending_jobs:
-                st.text(job)
-        else:
-            st.text("Alle Jobs sind abgeschlossen.")
+        # if pending_jobs:
+        #     st.subheader("Noch nicht abgeschlossene Jobs:")
+        #     for job in pending_jobs:
+        #         st.text(job)
+        # else:
+        #     st.text("Alle Jobs sind abgeschlossen.")
+        for topic_name, topic in topics_progress.items():
+            st.subheader(f"Topic: {topic_name}")
+            # wenn man drauf klickt klappt der rest erst aus sollte auch wieder deaktivierbar sein also eher eine art schalter aber als butten
+            if st.button(f"Fortschritt für {topic_name} anzeigen"):
+                for subtopic_name, subtopic_t in topic.items():
+                    subtopic, subtopic_path = subtopic_t
+                    st.subheader(f"Subtopic: {subtopic_name}")
+                    Dashboard.update_single_topic(subtopic, subtopic_path)
 
-        for topic, (jobs, folder) in topics_progress.items():
-            st.subheader(f"Topic: {topic}")
+    def update_single_topic(jobs, folder):
+        print(f"{jobs=}")
+        print(f"{folder=}")
+        total_jobs = len(jobs)
+        completed_jobs = sum(1 for progress, _, _, _ in jobs.values() if "Progress: 100%" == progress)
+        not_started_jobs = sum(1 for progress, _, _, _ in jobs.values() if progress == "Not Started")
 
-            total_jobs = len(jobs)
-            completed_jobs = sum(1 for progress, _, _, _ in jobs.values() if "Progress: 100%" == progress)
-            not_started_jobs = sum(1 for progress, _, _, _ in jobs.values() if progress == "Not Started")
-
-            if completed_jobs == total_jobs:
-                st.markdown(f"<div style='background-color: green; height: 10px; width: 100%'></div>", unsafe_allow_html=True)
-                energy = 2 * jobs[list(jobs.keys())[0]][3]
-                for i in range(completed_jobs):
-                    energy -= jobs[list(jobs.keys())[i]][3]
-                st.text(f"{energy * 627.509474:.6f} kcal/mol")
-                
-                LEDExtractor(BASE_PATH).extract_LED_energy()
-                extract(folder)
+        if completed_jobs == total_jobs:
+            st.markdown(f"<div style='background-color: green; height: 10px; width: 100%'></div>", unsafe_allow_html=True)
+            energy = 2 * jobs[list(jobs.keys())[0]][3]
+            for i in range(completed_jobs):
+                energy -= jobs[list(jobs.keys())[i]][3]
+            st.text(f"{energy * 627.509474:.6f} kcal/mol")
+            
+            LEDExtractor(BASE_PATH).extract_LED_energy()
+            extract(folder)
+            # nur wenn drauf geklickt wird
+            if st.button(f"Visualisierung für {folder.name} erstellen"):
                 Visualizer.visualize_in_3Dmol(Path(folder), Path(folder) / "viz.py")
 
-                st.text(f"Alle Berechnungen abgeschlossen!")
-                # logging.info(f"All calculations completed for topic: {topic}")
-            elif not_started_jobs == total_jobs:
-                st.markdown(f"<div style='background-color: grey; height: 10px; width: 100%'></div>", unsafe_allow_html=True)
-                st.text(f"Alle Berechnungen noch nicht gestartet.")
-                # logging.info(f"No calculations started for topic: {topic}")
-            else:
-                num_columns = 7
-                cols = st.columns(num_columns)
+            st.text(f"Alle Berechnungen abgeschlossen!")
+            # logging.info(f"All calculations completed for topic: {topic}")
+        elif not_started_jobs == total_jobs:
+            st.markdown(f"<div style='background-color: grey; height: 10px; width: 100%'></div>", unsafe_allow_html=True)
+            st.text(f"Alle Berechnungen noch nicht gestartet.")
+            # logging.info(f"No calculations started for topic: {topic}")
+        else:
+            num_columns = 7
+            cols = st.columns(num_columns)
 
-                for i, (subfolder_name, (progress, runtime, path, energy)) in enumerate(jobs.items()):
-                    subfolder_name = subfolder_name.replace("fragment_", "")
-                    color, progress_value = JobHandler.get_color_and_progress(progress)
-                    if len(subfolder_name) > 6:
-                        subfolder_name = subfolder_name[:6] + "..."
+            for i, (subfolder_name, (progress, runtime, path, energy)) in enumerate(jobs.items()):
+                subfolder_name = subfolder_name.replace("fragment_", "")
+                color, progress_value = JobHandler.get_color_and_progress(progress)
+                if len(subfolder_name) > 6:
+                    subfolder_name = subfolder_name[:6] + "..."
 
-                    col = cols[i % num_columns]
-                    with col:
-                        st.text(f"{subfolder_name}:\n{progress_value}%\n{runtime if runtime else 'No Time'}")
-                        st.markdown(f"<div style='background-color: {color}; height: 10px; width: {progress_value}%'></div>", unsafe_allow_html=True)
+                col = cols[i % num_columns]
+                with col:
+                    st.text(f"{subfolder_name}:\n{progress_value}%\n{runtime if runtime else 'No Time'}")
+                    st.markdown(f"<div style='background-color: {color}; height: 10px; width: {progress_value}%'></div>", unsafe_allow_html=True)
 
-                st.text(f"Fortschritt des Topics: {completed_jobs}/{total_jobs} abgeschlossen")
-                # logging.info(f"Progress for topic {topic}: {completed_jobs}/{total_jobs} completed.")
+            st.text(f"Fortschritt des Topics: {completed_jobs}/{total_jobs} abgeschlossen")
+            # logging.info(f"Progress for topic {topic}: {completed_jobs}/{total_jobs} completed.")
 
     @staticmethod
     @st.fragment(run_every="600s")
     def upload_file_and_start_calculation():
         file_paths = []
         st.title("Neue Berechnung starten")
+        #dropdown für topics die schon existieren außer scripts, tests, XBPy LEDAW versteckte ordner und z3_env
+        topic_options = [f for f in os.listdir(BASE_PATH) if os.path.isdir(os.path.join(BASE_PATH, f)) and f not in ["scripts", "tests", "z3_env", "LEDAW", "database", "database_2", "logs"] and not f.startswith(".")]
+        topic_options.append("Neues Topic erstellen")
+        topic = st.selectbox("Topic auswählen", topic_options, index=len(topic_options)-1)
+        if topic == "Neues Topic erstellen":
+            new_topic = st.text_input("Neuen Topic-Namen eingeben")
+            if new_topic:
+                new_topic_path = BASE_PATH / new_topic
+                new_topic_path.mkdir(parents=True, exist_ok=True)
+                # new_topic soll entfernt werden
+                topic_options.append(new_topic)
+                topic = new_topic
+                st.success("Neues Topic erfolgreich erstellt.")
         uploaded_files = st.file_uploader("Wählen Sie eine Datei aus", type=["xyz", "mol2", "sdf"], accept_multiple_files=True)
         
         if uploaded_files:
             for f in uploaded_files:
                 if f.name.endswith(".sdf"):
-                    path = FileHandler.handle_file_upload(f)
-                    file_paths.extend(FileHandler.sanitize_saving(MoleculeVisualizer.convert_sdf_to_mol2(path), f.name))
+                    path = FileHandler.handle_file_upload(topic, f)
+                    file_paths.extend(FileHandler.sanitize_saving(topic, MoleculeVisualizer.convert_sdf_to_mol2(path), f.name))
                     path.unlink()
                     path.parent.rmdir()
                 else:
-                    file_paths.append(FileHandler.handle_file_upload(f))
+                    file_paths.append(FileHandler.handle_file_upload(topic, f))
             Visualizer.visualize_xyz(file_paths)
         header_input = st.text_area("Zusätzliche Header-Einstellungen für die .inp-Datei (optional)", """! DLPNO-CCSD(T) def2-svp def2-svp/C DEF2/J RIJCOSX tightSCF normalPNO LED
 
-%maxcore 160000
+    %maxcore 160000
 
-%mdci
-    MaxIter 200
-end""")
+    %mdci
+        MaxIter 200
+    end""")
         if st.button("Berechnung starten"):
             if file_paths:
                 for i in range(len(file_paths)):
@@ -253,55 +276,57 @@ end""")
     def check_progress_of_all_jobs():
         logging.info("Checking progress of all jobs.")
         topics_dir = BASE_PATH
-        topics_progress = {}
-        total_files = 0
-        completed_files = 0
-        pending_jobs = []
-
+        topics = {}
         for topic_name in os.listdir(topics_dir):
+            topics [topic_name] = {}
             topic_path = Path(topics_dir) / topic_name
-            if os.path.isdir(topic_path):
+            topics [topic_name] = Dashboard.check_progress_of_single_topic(topic_path)
+            if topics[topic_name] == {}:
+                del topics[topic_name]
+        Dashboard.update_dashboard(topics)
+        logging.info("Finished checking progress of all jobs.")
+    
+    @staticmethod
+    def check_progress_of_single_file(path):
+        if path.is_dir():
+            output_file = path / f"{path.stem}.out"
+            if output_file.exists():
+                lines = output_file.read_text()
+
+                progress, runtime = JobHandler.get_progress_of_job(lines, path / path.stem)
+                jobs_progress = (progress, runtime, path.stem, JobHandler.energy_extraction(lines))
+            else:
+                jobs_progress = ("Not Started", None, path.stem, None)
+        return jobs_progress
+
+    @staticmethod
+    def check_progress_of_single_topic(topic_path):
+        subtopics = {}
+        for subfolder_name in os.listdir(topic_path):
+            subtopics[subfolder_name] = {}
+            subfolder_path = Path(topic_path) / subfolder_name
+            if os.path.isdir(subfolder_path):
                 subfolders = sorted(
-                    [f for f in topic_path.iterdir() if f.is_dir()],
+                    [f for f in subfolder_path.iterdir() if f.is_dir()],
+                    key=lambda x: ("subsys_" in x.name, x.name)
+                ) or sorted(
+                    [f for f in subfolder_path.iterdir() if f.is_dir()],
                     key=lambda x: ("fragment_" in x.name, x.name)
                 )
-                subfolders = sorted(
-                    [f for f in topic_path.iterdir() if f.is_dir()],
-                    key=lambda x: ("subsys_" in x.name, x.name)
-                )
-
-                check = False
-                for folder in subfolders:
-                    if folder.name.startswith("fragment_") or folder.name.startswith("subsys_"):
-                        check = True
-                        break
+                check = any(folder.name.startswith(("fragment_", "subsys_")) for folder in subfolders)
 
                 if check:
                     jobs_progress = {}
-                    for subfolder_name in subfolders:
-                        job_path = Path(os.path.join(topic_path, subfolder_name))
-                        if os.path.isdir(job_path):
-                            output_file = os.path.join(subfolder_name, f"{subfolder_name.stem}.out")
-                            if os.path.exists(output_file):
-                                total_files += 1
-                                with open(output_file, 'r') as f:
-                                    lines = f.read()
-
-                                progress, runtime = JobHandler.get_progress_of_job(lines, Path(os.path.join(job_path, f"{subfolder_name.stem}")))
-                                jobs_progress[subfolder_name.stem] = (progress, runtime, job_path.stem, JobHandler.energy_extraction(lines))
-
-                                if progress != "Progress: 100%":
-                                    pending_jobs.append(f"{topic_name} - {subfolder_name.stem}")
-                                else:
-                                    completed_files += 1
-                            else:
-                                jobs_progress[subfolder_name.stem] = ("Not Started", None, job_path.stem, None)
-
+                    for subsubfolder_name in subfolders:
+                        job_path = subfolder_path / subsubfolder_name
+                        jobs_info = Dashboard.check_progress_of_single_file(job_path)
+                        jobs_progress[subsubfolder_name] = jobs_info
                     if jobs_progress:
-                        topics_progress[topic_name] = (jobs_progress, topic_path)
-        topics_progress = dict(sorted(topics_progress.items(), key=lambda x: x[0]))
-        Dashboard.update_dashboard(topics_progress, total_files, completed_files, pending_jobs)
-        logging.info("Finished checking progress of all jobs.")
+                        subtopics[subfolder_name] = (jobs_progress, subfolder_path)
+
+            if subtopics[subfolder_name] == {}:
+                del subtopics[subfolder_name]
+        return subtopics
 
 Dashboard.check_progress_of_all_jobs()
 Dashboard.upload_file_and_start_calculation()
