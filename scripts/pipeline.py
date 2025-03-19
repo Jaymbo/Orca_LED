@@ -5,14 +5,12 @@ import time
 from pathlib import Path
 import subprocess
 from openbabel import openbabel
-from pymol import cmd as pycmd
 from database import Database
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from LEDAW.ledaw_package.nbody_engine import engine_LED_N_body
-from XBPy.module.xbpy.rdutil.io import read_molecules, write_molecules
+from XBPy.module.xbpy.rdutil.io import read_molecules
 from rdkit.Chem.rdmolops import GetFormalCharge, GetMolFrags
-from rdkit.Chem.rdmolfiles import MolToXYZFile, MolToXYZBlock
+from rdkit.Chem.rdmolfiles import MolToXYZBlock
 import numpy as np
 
 
@@ -81,9 +79,8 @@ class Mol2FileHandler:
 
 
 class ORCAInputFileCreator:
-    def __init__(self, file, fragments=None, header_in=None):
+    def __init__(self, file, header_in=None):
         self.file = file
-        self.fragments = fragments
         self.header = header_in or """! DLPNO-CCSD(T) def2-svp def2-svp/C DEF2/J RIJCOSX veryTIGHTSCF TIGHTPNO LED
 
 %mdci DoDIDplot true end
@@ -139,16 +136,13 @@ end"""
         fragment_lines = self.handle_fragments() if self.fragments != "-1" else None
 
         xyz_files = sorted(glob.glob(os.path.join(self.xyz_folder, "*.xyz")))
-        # alle xyz dateien aussortieren die fragment im namen haben
-        xyz_files = [i for i in xyz_files if "fragment" not in i]
-        xyz_files.sort(key=lambda x: (x.startswith('subsys_'), x))
+        # alle die mit subsys anfangen sortieren alle andetren aussortieren
+        xyz_files = [file for file in xyz_files if "subsys_" in file]
+        xyz_files.append(self.xyz_file)
         if not xyz_files:
             logging.warning("No .xyz files found in the specified folder.")
             return
-
-        ind = 0
         for i, xyz_file_i in enumerate(xyz_files):
-            i = i-1
             self.create_single_inp_file(xyz_file_i, Path(xyz_file_i).parent, self.frag_len[i], fragment_lines[i])
             path = Database.process_candidate(Path(xyz_file_i.split(".")[0]))
             if path:

@@ -10,14 +10,11 @@ def extract(folder, ligand=False):
     viz_file = f"{folder}/viz.py"
     xyz_file = f"{folder}/{os.path.basename(folder)}.xyz"
     if os.path.exists(viz_file):
-        print(f"File {viz_file} does not exist.")
         return
     if not os.path.exists(xyz_file):
-        print(f"File {xyz_file} does not exist.")
         return
     bindungen, werte = fetch_data(folder)
     if bindungen is None or werte is None or len(bindungen) == 0 or len(werte) == 0 or bindungen.size == 0 or werte.size == 0 :
-        print("No data found.")
         return
 
     if ligand:

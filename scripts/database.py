@@ -208,29 +208,29 @@ class Database:
         step_start = time.time()
         matched, exists = db.molecule_exists(candidate_xyz, matched, header)
         step_end = time.time()
-        logging.info("Step 3: Check if molecule exists - Time taken: %.4f seconds", step_end - step_start)
+        # logging.info("Step 3: Check if molecule exists - Time taken: %.4f seconds", step_end - step_start)
 
-        if not exists:
-            step_start = time.time()
-            db.insert(new_dir, new_filepath)
-            step_end = time.time()
-            logging.info("Step 4: Insert new molecule - Time taken: %.4f seconds", step_end - step_start)
+        # if not exists:
+        step_start = time.time()
+        db.insert(new_dir, new_filepath)
+        step_end = time.time()
+        # logging.info("Step 4: Insert new molecule - Time taken: %.4f seconds", step_end - step_start)
+        
+        end_time = time.time()
+        # logging.info("Total time taken to process candidate: %.4f seconds", end_time - start_time)
+        return str(new_filepath) + ".xyz"
+        # else:
+        #     step_start = time.time()
+        #     existing_folder = db.base / matched[0]
+        #     out_path = existing_folder / (matched[0] + ".out")
+        #     db.create_symlink(out_path)
+        #     step_end = time.time()
+        #     logging.info("Step 4: Create symlink for existing molecule - Time taken: %.4f seconds", step_end - step_start)
             
-            end_time = time.time()
-            logging.info("Total time taken to process candidate: %.4f seconds", end_time - start_time)
-            return str(new_filepath) + ".xyz"
-        else:
-            step_start = time.time()
-            existing_folder = db.base / matched[0]
-            out_path = existing_folder / (matched[0] + ".out")
-            db.create_symlink(out_path)
-            step_end = time.time()
-            logging.info("Step 4: Create symlink for existing molecule - Time taken: %.4f seconds", step_end - step_start)
-            
-            end_time = time.time()
-            logging.info("Total time taken to process candidate: %.4f seconds", end_time - start_time)
-            print(db.header_from_file())
-            return None
+        #     end_time = time.time()
+        #     logging.info("Total time taken to process candidate: %.4f seconds", end_time - start_time)
+        #     print(db.header_from_file())
+        #     return None
 
     def add_calculation(self):
         start_time = time.time()
