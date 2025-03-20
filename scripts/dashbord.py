@@ -11,6 +11,7 @@ from xlsx_to_sdf import SdfXyzMerger
 
 BASE_PATH = Path(Path(__file__).resolve().parent.parent / "calculations")
 open_topic = ""
+state = 0
 
 
 class Dashboard:
@@ -22,10 +23,10 @@ class Dashboard:
             st.components.v1.html(viewer._make_html(), height=600)
 
         @staticmethod
-        def visualize_in_3Dmol(molecule_path: Path, lines_path: Path):
+        def visualize_in_3Dmol(molecule_path: Path, state: int):
             MoleculeVisualizer.show_led_analysis(
                 molecule_dir=molecule_path,
-                lines_path=lines_path
+                state = state,
             )
 
     @staticmethod
@@ -274,64 +275,76 @@ class Dashboard:
             return subtopics
 
         def update_dashboard(topics_progress):
-            global open_topic
+            global open_topic, state
 
             def update_single_topic(jobs, folder):
-                print(f"{jobs=}")
-                print(f"{folder=}")
                 total_jobs = len(jobs)
                 completed_jobs = sum(1 for progress, _, _, _ in jobs.values() if "Progress: 100%" == progress)
-                not_started_jobs = sum(1 for progress, _, _, _ in jobs.values() if progress == "Not Started")
+                # not_started_jobs = sum(1 for progress, _, _, _ in jobs.values() if progress == "Not Started")
 
                 if completed_jobs == total_jobs:
-                    st.markdown(f"<div style='background-color: green; height: 10px; width: 100%'></div>", unsafe_allow_html=True)
+                    # st.markdown(f"<div style='background-color: green; height: 10px; width: 100%'></div>", unsafe_allow_html=True)
                     energy = 2 * jobs[list(jobs.keys())[0]][3]
                     for i in range(completed_jobs):
                         energy -= jobs[list(jobs.keys())[i]][3]
-                    st.text(f"{energy * 627.509474:.6f} kcal/mol")
+                    # st.text(f"{energy * 627.509474:.6f} kcal/mol")
                     
                     LEDExtractor(BASE_PATH).extract_LED_energy()
                     sdf_file = folder.parent / f"{folder.parent.name}.sdf"
                     xyz_file = folder / f"{folder.name}.xyz"
-                    SdfXyzMerger(sdf_file, xyz_file, folder).run()
+                    SdfXyzMerger(sdf_file, xyz_file, folder)
                     extract(folder)
                     # nur wenn drauf geklickt wird
-                    if st.button(f"Visualisierung für {folder.name} erstellen"):
-                        Dashboard.Visualizer.visualize_in_3Dmol(Path(folder), Path(folder) / "viz.py")
+                    # if st.button(f"Visualisierung für {folder.name} erstellen"):
+                    #     Dashboard.Visualizer.visualize_in_3Dmol(Path(folder), Path(folder) / "viz.py")
 
-                    st.text(f"Alle Berechnungen abgeschlossen!")
+                    # st.text(f"Alle Berechnungen abgeschlossen!")
                     # logging.info(f"All calculations completed for topic: {topic}")
-                elif not_started_jobs == total_jobs:
-                    st.markdown(f"<div style='background-color: grey; height: 10px; width: 100%'></div>", unsafe_allow_html=True)
-                    st.text(f"Alle Berechnungen noch nicht gestartet.")
+                # elif not_started_jobs == total_jobs:
+                    # st.markdown(f"<div style='background-color: grey; height: 10px; width: 100%'></div>", unsafe_allow_html=True)
+                    # st.text(f"Alle Berechnungen noch nicht gestartet.")
                     # logging.info(f"No calculations started for topic: {topic}")
-                else:
-                    num_columns = 7
-                    cols = st.columns(num_columns)
+                # else:
+                #     num_columns = 7
+                #     cols = st.columns(num_columns)
 
-                    for i, (subfolder_name, (progress, runtime, path, energy)) in enumerate(jobs.items()):
-                        subfolder_name = subfolder_name.replace("fragment_", "")
-                        color, progress_value = JobHandler.get_color_and_progress(progress)
-                        if len(subfolder_name) > 6:
-                            subfolder_name = subfolder_name[:6] + "..."
+                #     for i, (subfolder_name, (progress, runtime, path, energy)) in enumerate(jobs.items()):
+                #         subfolder_name = subfolder_name.replace("fragment_", "")
+                #         color, progress_value = JobHandler.get_color_and_progress(progress)
+                #         if len(subfolder_name) > 6:
+                #             subfolder_name = subfolder_name[:6] + "..."
 
-                        col = cols[i % num_columns]
-                        with col:
-                            st.text(f"{subfolder_name}:\n{progress_value}%\n{runtime if runtime else 'No Time'}")
-                            st.markdown(f"<div style='background-color: {color}; height: 10px; width: {progress_value}%'></div>", unsafe_allow_html=True)
+                #         col = cols[i % num_columns]
+                    #     with col:
+                    #         st.text(f"{subfolder_name}:\n{progress_value}%\n{runtime if runtime else 'No Time'}")
+                    #         st.markdown(f"<div style='background-color: {color}; height: 10px; width: {progress_value}%'></div>", unsafe_allow_html=True)
 
-                    st.text(f"Fortschritt des Topics: {completed_jobs}/{total_jobs} abgeschlossen")
+                    # st.text(f"Fortschritt des Topics: {completed_jobs}/{total_jobs} abgeschlossen")
                     # logging.info(f"Progress for topic {topic}: {completed_jobs}/{total_jobs} completed.")
             
+            def download_sdf_file(sdf_file):
+                viz_file = Path(str(sdf_file).split('.')[0] + f".py")
+                print(viz_file)
+                if sdf_file.exists():
+                    with open(sdf_file, "rb") as file:
+                        st.download_button(label="Download SDF", data=file, file_name=sdf_file.name)
+                if viz_file.exists():
+                    with open(viz_file, "rb") as file:
+                        st.download_button(label="Download viz.py", data=file, file_name=viz_file.name)
+
             st.title('ORCA-Status')
             for topic_name, topic in topics_progress.items():
                 st.subheader(f"Topic: {topic_name}")
                 if st.button(f"Fortschritt für {topic_name} anzeigen") or open_topic == topic_name:
                     open_topic = topic_name
+                    sdf_file = BASE_PATH / f"{topic_name}/{topic_name}.sdf"
+                    download_sdf_file(sdf_file)
                     for subtopic_name, subtopic_t in topic.items():
                         subtopic, subtopic_path = subtopic_t
-                        st.subheader(f"Subtopic: {subtopic_name}")
+                        # st.subheader(f"Subtopic: {subtopic_name}")
                         update_single_topic(subtopic, subtopic_path)
+                    
+                    Dashboard.Visualizer.visualize_in_3Dmol(BASE_PATH / topic_name, state)
                     if st.button(f"Fortschritt für {topic_name} einklappen"):
                         open_topic = ""
                         st.empty()
