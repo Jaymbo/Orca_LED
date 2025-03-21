@@ -29,15 +29,20 @@ class LEDExtractor:
 
     def extract_LED_energy(self):
         if not os.path.exists(self.xyz_file):
+            print(f"XYZ file {self.xyz_file} does not exist.")
             return 
-        
-        if os.path.exists(self.xlsx_file):
+        # wenn die xlsx neuer bearbeitet ist als die xyz return
+        if os.path.exists(self.xlsx_file) and os.path.getmtime(self.xlsx_file) > os.path.getmtime(self.xyz_file):
+            # print(f"Excel file {self.xlsx_file} is newer than the XYZ file {self.xyz_file}.")
             return
         
         print(f"Extracting LED energies from {self.base}")
         dateinamen = [folder for folder in self.base_path.iterdir() if folder.is_dir()]
         dateinamen.sort(key=lambda x: (x.name.startswith('fragment_'), x.name))
         dateinamen.sort(key=lambda x: (x.name.startswith('subsys_'), x.name))
+        if len(dateinamen) <= 2:
+            print("Not enough directories found.")
+            return
         
         self.filepaths = [str(folder / f"{folder.name}.out") for folder in dateinamen]
         
@@ -47,7 +52,7 @@ class LEDExtractor:
                 self.content.append(content)
         
         print(f"len(dateinamen): {len(dateinamen)}")
-        if not self.content or " LED " not in self.content[0] or len(dateinamen) <= 2:
+        if not self.content or " LED " not in self.content[0]:
             print("LED keyword not found in the first file content.")
             return
         
@@ -69,3 +74,5 @@ class LEDExtractor:
                           method=method,
                           LEDAW_output_path=LEDAW_output_path)
         print("LED engine execution completed successfully.")
+        # datum der xlsx auf jetzt stellen
+        os.utime(self.xlsx_file, None)

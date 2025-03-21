@@ -1,5 +1,6 @@
 import os
 import re
+import time
 import streamlit as st
 from pathlib import Path
 import pipeline
@@ -8,6 +9,7 @@ from csv_to_viz import extract
 from visualization import MoleculeVisualizer
 import logging
 from xlsx_to_sdf import SdfXyzMerger
+from rdkit import Chem
 
 BASE_PATH = Path(Path(__file__).resolve().parent.parent / "calculations")
 open_topic = ""
@@ -23,10 +25,11 @@ class Dashboard:
             st.components.v1.html(viewer._make_html(), height=600)
 
         @staticmethod
-        def visualize_in_3Dmol(molecule_path: Path, state: int):
+        def visualize_in_3Dmol(mols, viz, state: int):
             MoleculeVisualizer.show_led_analysis(
-                molecule_dir=molecule_path,
-                state = state,
+                mols=mols,
+                viz=viz,
+                state=state,
             )
 
     @staticmethod
@@ -277,7 +280,7 @@ class Dashboard:
         def update_dashboard(topics_progress):
             global open_topic, state
 
-            def update_single_topic(jobs, folder):
+            def update_single_topic(jobs, folder, mols, viz, check_sdf=True):
                 total_jobs = len(jobs)
                 completed_jobs = sum(1 for progress, _, _, _ in jobs.values() if "Progress: 100%" == progress)
                 # not_started_jobs = sum(1 for progress, _, _, _ in jobs.values() if progress == "Not Started")
@@ -289,11 +292,11 @@ class Dashboard:
                         energy -= jobs[list(jobs.keys())[i]][3]
                     # st.text(f"{energy * 627.509474:.6f} kcal/mol")
                     
-                    LEDExtractor(BASE_PATH).extract_LED_energy()
-                    sdf_file = folder.parent / f"{folder.parent.name}.sdf"
+                    LEDExtractor(folder).extract_LED_energy()
                     xyz_file = folder / f"{folder.name}.xyz"
-                    SdfXyzMerger(sdf_file, xyz_file, folder)
                     extract(folder)
+                    if check_sdf:
+                        mols, viz = SdfXyzMerger(xyz_file, folder, mols, viz).run()
                     # nur wenn drauf geklickt wird
                     # if st.button(f"Visualisierung für {folder.name} erstellen"):
                     #     Dashboard.Visualizer.visualize_in_3Dmol(Path(folder), Path(folder) / "viz.py")
@@ -322,7 +325,8 @@ class Dashboard:
                     # st.text(f"Fortschritt des Topics: {completed_jobs}/{total_jobs} abgeschlossen")
                     # logging.info(f"Progress for topic {topic}: {completed_jobs}/{total_jobs} completed.")
             
-            def download_sdf_file(sdf_file):
+                return mols, viz
+            def download_sdf_file():
                 viz_file = Path(str(sdf_file).split('.')[0] + f".py")
                 print(viz_file)
                 if sdf_file.exists():
@@ -332,19 +336,67 @@ class Dashboard:
                     with open(viz_file, "rb") as file:
                         st.download_button(label="Download viz.py", data=file, file_name=viz_file.name)
 
+            def load_sdf():
+                if not sdf_file.exists() or sdf_file.stat().st_size == 0:
+                    mols = []
+                else:
+                    suppl = Chem.SDMolSupplier(sdf_file, removeHs=False)
+                    mols = [mol for mol in suppl if mol is not None]
+                return mols
+
+            def load_mols():
+                if not sdf_file.exists():
+                    sdf_file.touch()
+                    mols = []
+                else:
+                    mols = load_sdf()
+                return mols
+    
+            def load_viz():
+                if not viz_file.exists():
+                    viz_file.touch()
+                    lines = ""
+                else:
+                    with open(viz_file, "r") as file:
+                        lines = file.read()
+                return lines
+                
+            def save_mols():
+                writer = Chem.SDWriter(sdf_file)
+                for mol in mols:
+                    writer.write(mol)
+                writer.close()
+            
+            def save_viz():
+                with open(viz_file, "w") as file:
+                    file.writelines(viz)
+
             st.title('ORCA-Status')
             for topic_name, topic in topics_progress.items():
                 st.subheader(f"Topic: {topic_name}")
                 if st.button(f"Fortschritt für {topic_name} anzeigen") or open_topic == topic_name:
                     open_topic = topic_name
                     sdf_file = BASE_PATH / f"{topic_name}/{topic_name}.sdf"
-                    download_sdf_file(sdf_file)
+                    viz_file = BASE_PATH / f"{topic_name}/{topic_name}.py"
+                    download_sdf_file()
+                    mols = load_mols()
+                    viz = load_viz()
+                    sdf_time = sdf_file.stat().st_mtime
+                    # wenn sdf time älter als 1 min ist True
+                    if sdf_time < (time.time() - 60):
+                        check_sdf = True
+                    else:
+                        check_sdf = False
+                    sdf_file.touch()
                     for subtopic_name, subtopic_t in topic.items():
                         subtopic, subtopic_path = subtopic_t
                         # st.subheader(f"Subtopic: {subtopic_name}")
-                        update_single_topic(subtopic, subtopic_path)
+                        mols, viz = update_single_topic(subtopic, subtopic_path, mols, viz, check_sdf=check_sdf)
                     
-                    Dashboard.Visualizer.visualize_in_3Dmol(BASE_PATH / topic_name, state)
+                    save_mols()
+                    save_viz()
+
+                    Dashboard.Visualizer.visualize_in_3Dmol(mols, viz, state)
                     if st.button(f"Fortschritt für {topic_name} einklappen"):
                         open_topic = ""
                         st.empty()

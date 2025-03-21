@@ -42,7 +42,8 @@ class MoleculeVisualizer:
     @classmethod
     def show_led_analysis(
         cls,
-        molecule_dir: Path,
+        mols: List[Chem.Mol],
+        viz: str,
         width: int = 800,
         height: int = 600,
         state: int = 0
@@ -54,40 +55,23 @@ class MoleculeVisualizer:
             width: Breite des Viewers
             height: Höhe des Viewers
         """
-        lines_path = molecule_dir / f"{molecule_dir.name}.py"
-        sdf_file =  molecule_dir / f"{molecule_dir.name}.sdf"	
         
-        if not sdf_file.exists():
-            st.warning("Keine SDF-Datei gefunden an " + str(molecule_dir))
+        if not mols:
+            st.warning("Keine Moleküle gefunden.")
             return
-        if sdf_file.exists():
-            with open(sdf_file, 'r') as f:
-                lines = f.readlines()
-            if len(lines) == 0:
-                suppl = []
-            else:
-                suppl = Chem.SDMolSupplier(sdf_file, removeHs=False)
-        else:
-            suppl = []
-        print("Anzahl der Moleküle in der SDF-Datei:", len(suppl))
-        if len(suppl) == 0:
+        print("Anzahl der Moleküle in der SDF-Datei:", len(mols))
+        if len(mols) == 0:
             st.warning("Keine Moleküle in der SDF-Datei gefunden")
             return
-        if len(suppl) == 1:
-            selected_mol = suppl[0]
+        if len(mols) == 1:
+            selected_mol = mols[0]
         else:
-            slider = st.slider("Wähle eine Konformation", 0, len(suppl) - 1, state)
-            if slider != state:
-                st.session_state["state"] = slider
-            selected_mol = suppl[st.session_state.get("state", state)]
+            state = st.slider("Wähle eine Konformation", 0, len(mols) - 1, state)
+            selected_mol = mols[st.session_state.get("state", state)]
         mol_data = Chem.AllChem.rdmolfiles.MolToXYZBlock(selected_mol)
-        viewer = cls.render_xyz([sdf_file], width, height, [mol_data])
-        if not lines_path.exists():
-            return
-        
-        with lines_path.open() as f:
-            lines_data = f.read()
-            cls._add_cylinders(viewer, lines_data, state)
+        viewer = cls.render_xyz([], width, height, [mol_data])
+        if viz != "":
+            cls._add_cylinders(viewer, viz, state)
         
         st.components.v1.html(viewer._make_html(), height=height)
 

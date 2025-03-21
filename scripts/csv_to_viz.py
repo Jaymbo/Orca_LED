@@ -8,9 +8,12 @@ from pathlib import Path
 def extract(folder, ligand=False):
     viz_file = f"{folder}/viz.py"
     xyz_file = f"{folder}/{os.path.basename(folder)}.xyz"
-    if os.path.exists(viz_file):
-        return
     if not os.path.exists(xyz_file):
+        print(f"XYZ file {xyz_file} does not exist.")
+        return
+    # wenn die viz neuer bearbeitet ist als die xyz return
+    if os.path.exists(viz_file) and os.path.getmtime(viz_file) > os.path.getmtime(xyz_file):
+        # print(f"Viz file {viz_file} is newer than the XYZ file {xyz_file}.")
         return
     bindungen, werte = fetch_data(folder)
     if bindungen is None or werte is None or len(bindungen) == 0 or len(werte) == 0 or bindungen.size == 0 or werte.size == 0 :
@@ -68,37 +71,6 @@ def extract(folder, ligand=False):
 
     bind = np.array(bind)
     pymolviz.Lines(bind, name="Lines", transparency=werte, color=col).write(f"{folder}/viz.py")
-    main_viz_file = Path(folder).parent / f"{Path(folder).parent.name}.py"
-    if not os.path.exists(main_viz_file):
-        # copy the generated viz.py to the main directory
-        with open(viz_file, 'r') as f:
-            lines = f.readlines()
-        with open(main_viz_file, 'w') as f:
-            f.writelines(lines)
-    else:
-        # append the Line part of generated viz.py to the main viz.py but change the state
-        with open(viz_file, 'r') as f:
-            lines = f.readlines()
-        with open(main_viz_file, 'r') as f:
-            main_lines = f.readlines()
-        with open(main_viz_file, 'w') as f:
-            counter = 1
-            for line in main_lines:
-                if line.startswith("Line"):
-                    counter += 1
-                if line.startswith("for"):
-                    break
-                f.write(line)
-            start = False
-            for line in lines:
-                if not start and line.startswith("Line"):
-                    start = True
-                    f.write(line)
-                    continue
-                elif start and line.startswith("cmd"):
-                    f.write(f"""cmd.load_cgo(Lines, "Lines", state={counter})""")
-                elif start:
-                    f.write(line)
 
 
 
