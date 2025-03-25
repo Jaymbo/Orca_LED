@@ -14,7 +14,6 @@ from rdkit.Chem.rdmolfiles import MolToXYZBlock
 from rdkit import Chem
 import numpy as np
 
-
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -118,7 +117,7 @@ end"""
         return fragment_groups
     
     @track_time
-    def create_inp_files(self) -> None:
+    def create_inp_files(self, file_cache) -> None:
         if self.file.endswith(".mol2"):
             Mol2FileHandler(self.file).convert_mol2_to_xyz(self.xyz_file)
         self.mols[self.xyz_file] = Mol(self.xyz_file, self.mols)
@@ -135,7 +134,7 @@ end"""
         for i, xyz_file_i in enumerate(xyz_files):
             mol = self.mols[xyz_file_i]
             self.create_single_inp_file(mol, xyz_file_i, Path(xyz_file_i).parent, self.frag_len[i], fragment_lines[i])
-            path = Database.process_candidate(Path(xyz_file_i.split(".")[0]))
+            path = Database.process_candidate(Path(xyz_file_i.split(".")[0]), file_cache)
             if path:
                 self.create_single_inp_file(mol, path, Path(path).parents[1], self.frag_len[i], fragment_lines[i])
                 sh_path = ShellScriptCreator.single_sh_script_erstellen(path, Path(path).parents[1], i, self.frag_len[i])

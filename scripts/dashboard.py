@@ -14,12 +14,14 @@ import cProfile
 import pstats
 import numpy as np
 import asyncio
+from database import Database
 
 BASE_PATH = Path(Path(__file__).resolve().parent.parent / "calculations")
 if not BASE_PATH.exists():
     BASE_PATH.mkdir(parents=True, exist_ok=True)
 open_topic = ""
 state = 0
+file_cache ={}
 
 def profile(func):
     def wrapper(*args, **kwargs):
@@ -144,7 +146,7 @@ class Dashboard:
             if file_paths:
                 st.info("Die Berechnung wurde in Auftrag gegeben...")
                 async def process_file(file_path):
-                    pipeline.ORCAInputFileCreator(str(file_path), header_input).create_inp_files()
+                    pipeline.ORCAInputFileCreator(str(file_path), header_input).create_inp_files(file_cache)
 
                 async def process_all_files():
                     tasks = [process_file(file_path) for file_path in file_paths]
