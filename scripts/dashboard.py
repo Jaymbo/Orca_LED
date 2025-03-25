@@ -10,6 +10,10 @@ from visualization import MoleculeVisualizer
 import logging
 from xlsx_to_sdf import SdfXyzMerger
 from rdkit import Chem
+import cProfile
+import pstats
+import numpy as np
+import asyncio
 
 BASE_PATH = Path(Path(__file__).resolve().parent.parent / "calculations")
 if not BASE_PATH.exists():
@@ -17,6 +21,16 @@ if not BASE_PATH.exists():
 open_topic = ""
 state = 0
 
+def profile(func):
+    def wrapper(*args, **kwargs):
+        profiler = cProfile.Profile()
+        profiler.enable()
+        result = func(*args, **kwargs)
+        profiler.disable()
+        stats = pstats.Stats(profiler).sort_stats('cumtime')
+        stats.print_stats(40)  # Print only the first 40 lines
+        return result
+    return wrapper
 
 class Dashboard:
     class Visualizer:
@@ -36,11 +50,14 @@ class Dashboard:
 
     @staticmethod
     @st.fragment(run_every="600s")
+    @profile
     def upload_file_and_start_calculation():
 
         def chose_topic():
+            # TODO für wenn topic noch nicht ausgewählt wurde und dann nichts neues eingegeben wird muss neues topic gelöscht werden mit inhalt
+            # besser noch einfach nur einmal hochladen und verschieben und nicht bei jedem mal neu hochladen
             neues_topic_text = "Neues Topic erstellen"
-            topic_options = [f for f in os.listdir(BASE_PATH) if os.path.isdir(os.path.join(BASE_PATH, f)) and f not in ["scripts", "tests", "z3_env", "LEDAW", "database", "database_2", "logs"] and not f.startswith(".")]
+            topic_options = [f for f in os.listdir(BASE_PATH) if os.path.isdir(os.path.join(BASE_PATH, f))]
             topic_options.append(neues_topic_text)
             index = topic_options.index(open_topic) if open_topic in topic_options else len(topic_options) - 1
             topic = st.selectbox("Topic auswählen", topic_options, index=index)
@@ -84,13 +101,14 @@ class Dashboard:
 
                 @staticmethod
                 def sanitize_saving(topic, content: list[str], name: str):
-                    paths = []
                     clean_name = name.translate(str.maketrans(" ", "_", "!$%&()=+,-/:;<=>?@[\]^`{|}~"))
-                    for i, text in enumerate(content):
-                        save_path = BASE_PATH / f"{topic}/{Path(clean_name).stem}_{i+1}/{Path(clean_name).stem}_{i+1}.mol2"
-                        save_path.parent.mkdir(parents=True, exist_ok=True)
-                        save_path.write_text(text)
-                        paths.append(save_path)
+                    paths = [
+                        BASE_PATH / f"{topic}/{Path(clean_name).stem}_{i+1}/{Path(clean_name).stem}_{i+1}.mol2"
+                        for i in range(len(content))
+                    ]
+                    for path, text in zip(paths, content):
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        path.write_text(text)
                     return paths
             uploaded_files = st.file_uploader("Wählen Sie eine Datei aus", type=["xyz", "mol2", "sdf"], accept_multiple_files=True)
             
@@ -124,15 +142,22 @@ class Dashboard:
     end""")
         if st.button("Berechnung starten"):
             if file_paths:
-                for i in range(len(file_paths)):
-                    st.info("Die Berechnung wurde in auftrag gegeben...")
-                    pipeline.ORCAInputFileCreator(str(file_paths[i]), header_input).create_inp_files()
-                    st.info("Die Berechnung wurde vorbereitet.")
+                st.info("Die Berechnung wurde in Auftrag gegeben...")
+                async def process_file(file_path):
+                    pipeline.ORCAInputFileCreator(str(file_path), header_input).create_inp_files()
+
+                async def process_all_files():
+                    tasks = [process_file(file_path) for file_path in file_paths]
+                    await asyncio.gather(*tasks)
+
+                asyncio.run(process_all_files())
+                st.success("Die Berechnung wurde vorbereitet.")
             else:
                 st.error("Bitte wählen Sie eine Datei aus.")
 
     @staticmethod
     @st.fragment(run_every="600s")
+    @profile
     def check_progress_of_all_jobs():
         class JobHandler:
             @staticmethod
@@ -158,12 +183,9 @@ class Dashboard:
                 if "INITIAL GUESS DONE" in output:
                     count += 1
                 for line in output:
-                    if "timings" in line.lower():
+                    if "TIMINGS" in line:
                         count += 1
-                if "LED" in output:
-                    return f"Progress: {int(count / 7 * 100)}%", runtime
-                else:
-                    return f"Progress: {int(count / 4 * 100)}%", runtime
+                return f"Progress: {int(count *50)}%", runtime
 
             @staticmethod
             def get_error_file(path):
@@ -406,12 +428,17 @@ class Dashboard:
         logging.info("Checking progress of all jobs.")
         topics_dir = BASE_PATH
         topics = {}
-        for topic_name in os.listdir(topics_dir):
-            topics[topic_name] = {}
+        async def process_topic(topic_name):
             topic_path = Path(topics_dir) / topic_name
-            topics[topic_name] = check_progress_of_single_topic(topic_path)
-            if topics[topic_name] == {}:
-                del topics[topic_name]
+            topic_progress = await asyncio.to_thread(check_progress_of_single_topic, topic_path)
+            if topic_progress:
+                topics[topic_name] = topic_progress
+
+        async def process_all_topics():
+            tasks = [process_topic(topic_name) for topic_name in os.listdir(topics_dir)]
+            await asyncio.gather(*tasks)
+
+        asyncio.run(process_all_topics())
         update_dashboard(topics)
         logging.info("Finished checking progress of all jobs.")
 

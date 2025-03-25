@@ -6,6 +6,7 @@ import numpy as np
 from scipy.optimize import linear_sum_assignment
 import time
 import os
+import sqlite3  # Neue Datenbankverbindung
 
 BASE_PATH = Path(__file__).resolve().parent.parent
 
@@ -20,6 +21,40 @@ class Database:
         self.get_file_paths()
         self.rmsd_value = 0.001
         self.ends = ["_out.out", ".out", ".densities", "_err.err", ".property.txt", ".bibtex", ".cube", ".densitiesinfo", ".sh", ".inp"]
+        self.conn = sqlite3.connect(self.base / "database.db")  # Datenbankverbindung
+        self.create_tables()
+        self.database_cache = self.load_database_cache()
+
+    def create_tables(self):
+        """Erstellen der notwendigen Tabellen in der Datenbank."""
+        with self.conn:
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS molecules (
+                    id INTEGER PRIMARY KEY,
+                    name TEXT,
+                    atoms TEXT,
+                    header TEXT,
+                    fragmentation TEXT,
+                    directory TEXT
+                )
+            """)
+
+    def load_database_cache(self) -> dict:
+        """Load the database into a cache to avoid reading files repeatedly."""
+        cache = {}
+        cursor = self.conn.execute("SELECT name, atoms, header, fragmentation, directory FROM molecules")
+        for row in cursor:
+            cache[row[0]] = {
+                "atoms": row[1],
+                "header": row[2],
+                "fragmentation": row[3],
+                "directory": row[4]
+            }
+        return cache
+
+    def get_cached_filecontent(self, folder_name: str, file_type: str) -> str:
+        """Retrieve file content from the cache."""
+        return self.database_cache.get(folder_name, {}).get(file_type, "")
 
     def get_file_paths(self):
         self.filename = self.dir.parent / f"{self.dir.stem}.xyz"
@@ -58,11 +93,13 @@ class Database:
         return dirpath, filepath
 
     def get_database_names(self) -> list:
-        return [f.name for f in self.base.iterdir() if f.is_dir()]
+        cursor = self.conn.execute("SELECT name FROM molecules")
+        return [row[0] for row in cursor]
 
-    def find_matches(self, current_name: str, database_names: list) -> list:
-        name_parts = current_name.split("_")[:1]
-        return [name for name in database_names if name.split("_")[:1] == name_parts]
+    def find_matches(self, current_name: str) -> list:
+        name_parts = current_name.split("_")[0]
+        cursor = self.conn.execute("SELECT name FROM molecules WHERE name LIKE ?", (f"{name_parts}%",))
+        return [row[0] for row in cursor]
 
     def compute_distance_matrix(self, coords: np.ndarray) -> np.ndarray:
         diff = coords[:, None, :] - coords[None, :, :]
@@ -95,7 +132,6 @@ class Database:
         D1 = self.compute_distance_matrix(coords1)
         D2 = self.compute_distance_matrix(coords2)
         row_ind, col_ind, _ = self.match_distance_matrices(D1, D2)
-        # logging.info("Row indices: %s, Column indices: %s", row_ind, col_ind)
         return self.rmsd_of_distance_matrices(D1, D2, row_ind, col_ind), col_ind
 
     def right_fragmentation(self, header_str, col_ind):
@@ -121,19 +157,25 @@ class Database:
             return matched, False
         fragments = self.right_fragmentation(header_str, None)
         header_header = "".join(char for char in header_str.split("*XYZfile")[0].strip() if char.isalnum())
+
         def check_header(folder):
-            xyz_path = self.base / folder / f"{folder}.inp"
-            with xyz_path.open("r") as f:
-                content = "".join(line.strip() for line in f)
-            output = "".join(char for char in content.split("*XYZfile")[0].strip() if char.isalnum())
-            print(output)
-            return output == header_header
+            cursor = self.conn.execute("SELECT header FROM molecules WHERE name = ?", (folder,))
+            row = cursor.fetchone()
+            if row:
+                output = "".join(char for char in row[0].split("*XYZfile")[0].strip() if char.isalnum())
+                return output == header_header
+            return False
 
         def compute_rmsd_and_col(folder):
-            xyz_path = self.base / folder / f"{folder}.xyz"
-            with xyz_path.open("r") as f:
-                content = f.read()
-            return self.rmsd(candidate_xyz, content)
+            cursor = self.conn.execute("SELECT directory FROM molecules WHERE name = ?", (folder,))
+            row = cursor.fetchone()
+            if row:
+                xyz_path = Path(row[0]) / f"{folder}.xyz"
+                with xyz_path.open("r") as f:
+                    content = f.read()
+                return self.rmsd(candidate_xyz, content)
+            return 100.0, None
+
         matched = [folder for folder in matched if check_header(folder)]
         if not matched:
             return matched, False
@@ -142,10 +184,11 @@ class Database:
         col_ind = [result[1] for result in results]
 
         def check_fragmentation(folder, col):
-            inp_path = self.base / folder / f"{folder}.inp"
-            with inp_path.open("r") as f:
-                content = f.read()
-            return self.right_fragmentation(content, col) == fragments
+            cursor = self.conn.execute("SELECT fragmentation FROM molecules WHERE name = ?", (folder,))
+            row = cursor.fetchone()
+            if row:
+                return self.right_fragmentation(row[0], col) == fragments
+            return False
 
         fragmentation_matches = np.array([check_fragmentation(folder, col) for folder, col in zip(matched, col_ind)])
 
@@ -170,6 +213,15 @@ class Database:
         self.header_filename.unlink()
         copy2(self.filename, xyz_path)
         self.create_symlink(xyz_path)
+        # Eintrag in die Datenbank hinzufügen
+        atoms = self.atoms_to_str(self.atoms_from_filecontent(self.get_filecontent()))
+        header = self.header_from_file()
+        fragmentation = self.right_fragmentation(header, None)
+        with self.conn:
+            self.conn.execute("""
+                INSERT INTO molecules (name, atoms, header, fragmentation, directory)
+                VALUES (?, ?, ?, ?, ?)
+            """, (filepath.stem, atoms, header, str(fragmentation), str(dirpath)))
 
     def create_symlink(self, out_path: Path) -> None:
         symlink_base = self.header_filename.parent / self.header_filename.stem
@@ -187,56 +239,28 @@ class Database:
 
     @classmethod
     def process_candidate(cls, dir: Path) -> Path:
-        start_time = time.time()
         db = cls(dir)
-        
-        step_start = time.time()
         candidate_xyz = db.get_filecontent()
         atoms = db.atoms_from_filecontent(candidate_xyz)
         header = db.header_from_file()
-        print(header)
         new_dir, new_filepath = db.create_filename(atoms)
-        step_end = time.time()
-        #logging.info("Step 1: Prepare candidate data - Time taken: %.4f seconds", step_end - step_start)
         
-        step_start = time.time()
         database_names = db.get_database_names()
         matched = db.find_matches(new_filepath.name, database_names)
-        step_end = time.time()
-        #logging.info("Step 2: Find matches in database - Time taken: %.4f seconds", step_end - step_start)
-        
-        step_start = time.time()
-        matched, exists = db.molecule_exists(candidate_xyz, matched, header)
-        step_end = time.time()
-        # logging.info("Step 3: Check if molecule exists - Time taken: %.4f seconds", step_end - step_start)
+        matched, exists = db.molecule_exists(candidate_xyz, matched, header)    
 
-        # if not exists:
-        step_start = time.time()
-        db.insert(new_dir, new_filepath)
-        step_end = time.time()
-        # logging.info("Step 4: Insert new molecule - Time taken: %.4f seconds", step_end - step_start)
-        
-        end_time = time.time()
-        # logging.info("Total time taken to process candidate: %.4f seconds", end_time - start_time)
-        return str(new_filepath) + ".xyz"
-        # else:
-        #     step_start = time.time()
-        #     existing_folder = db.base / matched[0]
-        #     out_path = existing_folder / (matched[0] + ".out")
-        #     db.create_symlink(out_path)
-        #     step_end = time.time()
-        #     logging.info("Step 4: Create symlink for existing molecule - Time taken: %.4f seconds", step_end - step_start)
-            
-        #     end_time = time.time()
-        #     logging.info("Total time taken to process candidate: %.4f seconds", end_time - start_time)
-        #     print(db.header_from_file())
-        #     return None
+        if not exists:
+            db.insert(new_dir, new_filepath)
+            return str(new_filepath) + ".xyz"
+        else:
+            existing_folder = db.base / matched[0]
+            out_path = existing_folder / (matched[0] + ".out")
+            db.create_symlink(out_path)
+            return None
 
     def add_calculation(self):
-        start_time = time.time()
         candidate_xyz = self.get_filecontent()
         atoms = self.atoms_from_filecontent(candidate_xyz)
-        header = self.header_from_file()
         new_dir, new_filepath = self.create_filename(atoms)
         new_dir.mkdir(parents=True, exist_ok=True)
 
@@ -255,12 +279,7 @@ class Database:
         destination = destination.with_suffix(".inp")
         copy2(self.header_filename, destination)
 
-        end_time = time.time()
-        logging.info("Calculation files copied to database folder: %s", new_dir)
-        logging.info("Time taken to add calculation: %.2f seconds", end_time - start_time)
-
     def cleanup(self):
-        start_time = time.time()
         database_names = self.get_database_names()
         for folder in self.base.iterdir():
             try:
@@ -282,8 +301,6 @@ class Database:
                         rm.rmdir()
             except Exception as e:
                 logging.error("Error in folder %s: %s", folder.name, e)
-        end_time = time.time()
-        logging.info("Time taken to clean up: %.2f seconds", end_time - start_time)
 
     def syslink_merge(self, original: Path, merged: Path):
         for folder in BASE_PATH.iterdir():
@@ -296,12 +313,9 @@ class Database:
                                 file.symlink_to(merged)
 
     def copy_to_db(self):
-        start_time = time.time()
         for folder in BASE_PATH.iterdir():
             if folder.is_dir():
                 for subfolder in folder.iterdir():
                     if subfolder.is_dir() and any(file.suffix == ".xyz" for file in folder.iterdir()):
                         Database(subfolder).add_calculation()
         self.cleanup()
-        end_time = time.time()
-        logging.info("Time taken to copy to database: %.2f seconds", end_time - start_time)
