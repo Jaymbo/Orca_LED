@@ -7,7 +7,7 @@
             "command": "bash",
             "args": [
                 "-c",
-                "source ~/miniconda3/etc/profile.d/conda.sh && conda activate Bachelorarbeit && streamlit run /lustre/work/ws/ws1/tu_zxofv28-my_workspace/scripts/dashbord.py"
+                "source ~/miniconda3/etc/profile.d/conda.sh && conda activate Bachelorarbeit && streamlit run scripts/dashboard.py"
             ],
             "runOptions": {
                 "runOn": "folderOpen"

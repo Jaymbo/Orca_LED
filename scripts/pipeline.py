@@ -8,7 +8,7 @@ from openbabel import openbabel
 from database import Database
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from XBPy.module.xbpy.rdutil.io import read_molecules
+from xbpy.rdutil.io import read_molecules
 from rdkit.Chem.rdmolops import GetFormalCharge, GetMolFrags
 from rdkit.Chem.rdmolfiles import MolToXYZBlock
 import numpy as np
@@ -81,6 +81,7 @@ class Mol2FileHandler:
 class ORCAInputFileCreator:
     def __init__(self, file, header_in=None):
         self.file = file
+        self.mols: dict[Mol] = {}
         self.header = header_in or """! DLPNO-CCSD(T) def2-svp def2-svp/C DEF2/J RIJCOSX veryTIGHTSCF TIGHTPNO LED
 
 %mdci DoDIDplot true end
@@ -129,8 +130,9 @@ end"""
         if self.file.endswith(".mol2"):
             Mol2FileHandler(self.file).convert_mol2_to_xyz(self.xyz_file)
             logging.info(f"Converted MOL2 file to XYZ: {self.file} -> {self.xyz_file}")
-            
-        self.fragments = FragmentExtractor.extract_fragments(self.file)
+        
+        self.mols[self.file] = Mol(self.file)
+        self.fragments = self.mols[self.file].get_fragments()
         logging.info(f"fragments: {self.fragments}")
 
         fragment_lines = self.handle_fragments() if self.fragments != "-1" else None
@@ -148,7 +150,7 @@ end"""
             if path:
                 self.create_single_inp_file(path, Path(path).parents[1], self.frag_len[i], fragment_lines[i])
                 sh_path = ShellScriptCreator.single_sh_script_erstellen(path, Path(path).parents[1], i, self.frag_len[i])
-                subprocess.run(["sbatch", sh_path])
+                # subprocess.run(["sbatch", sh_path])
 
     @track_time
     def handle_fragments(self):
@@ -213,7 +215,9 @@ end"""
     @track_time
     def create_single_inp_file(self, xyz_file_i, base, frag_len, fragment_line):
         logging.info(f"Creating single ORCA input file for: {xyz_file_i}")
-        charge = ChargeCalculator.calculate_charge(self.file if os.path.basename(self.xyz_file).split(".")[0] == os.path.basename(xyz_file_i).split(".")[0] else xyz_file_i)
+        if not xyz_file_i in self.mols:
+            self.mols[xyz_file_i] = Mol(xyz_file_i)
+        charge = self.mols[xyz_file_i].get_charge()
         inp_content = self.create_inp_file_content(charge, frag_len, xyz_file_i, fragment_line)
         base_name = os.path.splitext(os.path.basename(xyz_file_i))[0]
         base_path = base / base_name
@@ -278,22 +282,33 @@ $orca $workspace_directory/$name/$name.inp > $workspace_directory/$name/$name.ou
             file.write(script_content)
         return total_path
 
+class Mol:
+    def __init__(self, filename):
+        self.filename = filename
+        self.mol = None
+        self.charge = None
+        self.fragments = None
+        logging.info(f"Initialized Mol with file: {filename}")
 
-class ChargeCalculator:
-    @staticmethod
-    def calculate_charge(filename):
-        mol = read_molecules(filename)
-        mol = next(mol)
-        charge = GetFormalCharge(mol)
-        return charge
+    def read_mol(self):
+        logging.info(f"Reading molecule from file: {self.filename}")
+        mol = read_molecules(self.filename)
+        self.mol = next(mol)
+
+    def get_charge(self):
+        if self.charge is not None:
+            return self.charge
+        if self.mol is None:
+            self.read_mol()
+        self.charge = GetFormalCharge(self.mol)
+        return self.charge
     
-class FragmentExtractor:
-    @staticmethod
-    @track_time
-    def extract_fragments(filename):
-        mol = read_molecules(filename)
-        mol = next(mol)
-        mol_block = MolToXYZBlock(mol).strip().split('\n')[2:]
+    def get_fragments(self):
+        if self.fragments is not None:
+            return self.fragments
+        if self.mol is None:
+            self.read_mol()
+        mol_block = MolToXYZBlock(self.mol).strip().split('\n')[2:]
         coords = np.zeros(3)
         distances = []
         for atom in mol_block:
@@ -304,7 +319,7 @@ class FragmentExtractor:
         distances = [np.linalg.norm(distance - coords) for distance in distances]
         closest_atom = np.argmin(distances) + 1
 
-        frags = GetMolFrags(mol, sanitizeFrags=False, asMols=False)
+        frags = GetMolFrags(self.mol, sanitizeFrags=False, asMols=False)
         #touple in touple zu liste in liste machen
         frags = [list(frag) for frag in frags]
         for i, frag in enumerate(frags):
@@ -319,5 +334,5 @@ class FragmentExtractor:
             frag_str += ","
         frag_str = frag_str[:-1]
         # erstes , durch # ersetzen
-        frag_str = frag_str.replace(',', '#', 1)  # Fixed the variable name from frags to frag_str
-        return frag_str
+        self.fragments = frag_str.replace(',', '#', 1)  # Fixed the variable name from frags to frag_str
+        return self.fragments

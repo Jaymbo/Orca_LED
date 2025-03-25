@@ -1,7 +1,7 @@
 import numpy as np
 import openpyxl
 from pathlib import Path
-from XBPy.module.xbpy.rdutil.io import read_molecules
+from xbpy.rdutil.io import read_molecules
 
 class SdfXyzMerger:
     def __init__(self, xyz_file, folder, mols=[], viz = ""):

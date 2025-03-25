@@ -12,6 +12,8 @@ from xlsx_to_sdf import SdfXyzMerger
 from rdkit import Chem
 
 BASE_PATH = Path(Path(__file__).resolve().parent.parent / "calculations")
+if not BASE_PATH.exists():
+    BASE_PATH.mkdir(parents=True, exist_ok=True)
 open_topic = ""
 state = 0
 
