@@ -3,31 +3,20 @@ import numpy as np
 import os
 import glob
 import pandas as pd
-import logging
-import time
+from pathlib import Path
 
-def track_time(func):
-    def wrapper(*args, **kwargs):
-        start_time = time.time()
-        result = func(*args, **kwargs)
-        end_time = time.time()
-        elapsed_time = end_time - start_time
-        logging.info(f"Function '{func.__name__}' took {elapsed_time:.2f} seconds to complete.")
-        return result
-    return wrapper
-
-@track_time
 def extract(folder, ligand=False):
     viz_file = f"{folder}/viz.py"
     xyz_file = f"{folder}/{os.path.basename(folder)}.xyz"
-    if os.path.exists(viz_file):
-        print(f"File {viz_file} does not exist.")
-        return
     if not os.path.exists(xyz_file):
-        print(f"File {xyz_file} does not exist.")
+        print(f"XYZ file {xyz_file} does not exist.")
+        return
+    # wenn die viz neuer bearbeitet ist als die xyz return
+    if os.path.exists(viz_file) and os.path.getmtime(viz_file) > os.path.getmtime(xyz_file):
+        # print(f"Viz file {viz_file} is newer than the XYZ file {xyz_file}.")
         return
     bindungen, werte = fetch_data(folder)
-    if bindungen is None and werte is None:
+    if bindungen is None or werte is None or len(bindungen) == 0 or len(werte) == 0 or bindungen.size == 0 or werte.size == 0 :
         return
 
     if ligand:
@@ -81,8 +70,9 @@ def extract(folder, ligand=False):
             bind.append(closest_pair)
 
     bind = np.array(bind)
-    print(f"{bind=}")
     pymolviz.Lines(bind, name="Lines", transparency=werte, color=col).write(f"{folder}/viz.py")
+
+
 
 def fetch_data(folder):
     """

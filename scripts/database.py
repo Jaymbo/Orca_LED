@@ -7,33 +7,40 @@ from scipy.optimize import linear_sum_assignment
 import time
 import os
 
+BASE_PATH = Path(__file__).resolve().parent.parent
+
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class Database:
-    def __init__(self, dir: Path) -> None:
-        self.base = Path("/lustre/work/ws/ws1/tu_zxofv28-my_workspace/database/")
+    def __init__(self, dir: Path, file_cache) -> None:
+        self.base = BASE_PATH / "database/"
         self.base.mkdir(parents=True, exist_ok=True)
         self.dir: Path = dir
         self.get_file_paths()
         self.rmsd_value = 0.001
         self.ends = ["_out.out", ".out", ".densities", "_err.err", ".property.txt", ".bibtex", ".cube", ".densitiesinfo", ".sh", ".inp"]
+        self.file_cache = file_cache
 
     def get_file_paths(self):
         self.filename = self.dir.parent / f"{self.dir.stem}.xyz"
         self.header_filename = self.dir / f"{self.dir.stem}.inp"
 
     def get_filecontent(self) -> str:
-        with self.filename.open("r") as f:
-            return f.read()
+        if self.filename not in self.file_cache:
+            with self.filename.open("r") as f:
+                self.file_cache[self.filename] = f.read()
+        return self.file_cache[self.filename]
 
     def atoms_from_filecontent(self, content: str) -> list:
         lines = [line for line in content.splitlines() if line.strip()]
         return [line.split()[0] for line in lines[2:]]
 
     def header_from_file(self) -> str:
-        with self.header_filename.open("r") as f:
-            return "".join(line.strip() for line in f)
+        if self.header_filename not in self.file_cache:
+            with self.header_filename.open("r") as f:
+                self.file_cache[self.header_filename] = "".join(line.strip() for line in f)
+        return self.file_cache[self.header_filename]
 
     def atoms_to_str(self, atoms: list) -> str:
         sorted_atoms = sorted(atom.upper() for atom in atoms)
@@ -121,16 +128,20 @@ class Database:
         header_header = "".join(char for char in header_str.split("*XYZfile")[0].strip() if char.isalnum())
         def check_header(folder):
             xyz_path = self.base / folder / f"{folder}.inp"
-            with xyz_path.open("r") as f:
-                content = "".join(line.strip() for line in f)
+            if xyz_path not in self.file_cache:
+                with xyz_path.open("r") as f:
+                    self.file_cache[xyz_path] = "".join(line.strip() for line in f)
+            content = self.file_cache[xyz_path]
             output = "".join(char for char in content.split("*XYZfile")[0].strip() if char.isalnum())
             print(output)
             return output == header_header
 
         def compute_rmsd_and_col(folder):
             xyz_path = self.base / folder / f"{folder}.xyz"
-            with xyz_path.open("r") as f:
-                content = f.read()
+            if xyz_path not in self.file_cache:
+                with xyz_path.open("r") as f:
+                    self.file_cache[xyz_path] = f.read()
+            content = self.file_cache[xyz_path]
             return self.rmsd(candidate_xyz, content)
         matched = [folder for folder in matched if check_header(folder)]
         if not matched:
@@ -141,8 +152,10 @@ class Database:
 
         def check_fragmentation(folder, col):
             inp_path = self.base / folder / f"{folder}.inp"
-            with inp_path.open("r") as f:
-                content = f.read()
+            if inp_path not in self.file_cache:
+                with inp_path.open("r") as f:
+                    self.file_cache[inp_path] = f.read()
+            content = self.file_cache[inp_path]
             return self.right_fragmentation(content, col) == fragments
 
         fragmentation_matches = np.array([check_fragmentation(folder, col) for folder, col in zip(matched, col_ind)])
@@ -184,50 +197,24 @@ class Database:
         return
 
     @classmethod
-    def process_candidate(cls, dir: Path) -> Path:
-        start_time = time.time()
-        db = cls(dir)
-        
-        step_start = time.time()
+    def process_candidate(cls, dir: Path, file_cache) -> Path:
+        db = cls(dir, file_cache)
         candidate_xyz = db.get_filecontent()
         atoms = db.atoms_from_filecontent(candidate_xyz)
         header = db.header_from_file()
-        print(header)
         new_dir, new_filepath = db.create_filename(atoms)
-        step_end = time.time()
-        #logging.info("Step 1: Prepare candidate data - Time taken: %.4f seconds", step_end - step_start)
         
-        step_start = time.time()
         database_names = db.get_database_names()
         matched = db.find_matches(new_filepath.name, database_names)
-        step_end = time.time()
-        #logging.info("Step 2: Find matches in database - Time taken: %.4f seconds", step_end - step_start)
-        
-        step_start = time.time()
-        matched, exists = db.molecule_exists(candidate_xyz, matched, header)
-        step_end = time.time()
-        logging.info("Step 3: Check if molecule exists - Time taken: %.4f seconds", step_end - step_start)
+        matched, exists = db.molecule_exists(candidate_xyz, matched, header)    
 
         if not exists:
-            step_start = time.time()
             db.insert(new_dir, new_filepath)
-            step_end = time.time()
-            logging.info("Step 4: Insert new molecule - Time taken: %.4f seconds", step_end - step_start)
-            
-            end_time = time.time()
-            logging.info("Total time taken to process candidate: %.4f seconds", end_time - start_time)
             return str(new_filepath) + ".xyz"
         else:
-            step_start = time.time()
             existing_folder = db.base / matched[0]
             out_path = existing_folder / (matched[0] + ".out")
             db.create_symlink(out_path)
-            step_end = time.time()
-            logging.info("Step 4: Create symlink for existing molecule - Time taken: %.4f seconds", step_end - step_start)
-            
-            end_time = time.time()
-            logging.info("Total time taken to process candidate: %.4f seconds", end_time - start_time)
-            print(db.header_from_file())
             return None
 
     def add_calculation(self):
@@ -284,8 +271,7 @@ class Database:
         logging.info("Time taken to clean up: %.2f seconds", end_time - start_time)
 
     def syslink_merge(self, original: Path, merged: Path):
-        dir = Path("/lustre/work/ws/ws1/tu_zxofv28-my_workspace/")
-        for folder in dir.iterdir():
+        for folder in BASE_PATH.iterdir():
             if folder.is_dir():
                 for subfolder in folder.iterdir():
                     if subfolder.is_dir() and any(file.suffix == ".xyz" for file in folder.iterdir()):
@@ -296,8 +282,7 @@ class Database:
 
     def copy_to_db(self):
         start_time = time.time()
-        dir = Path("/lustre/work/ws/ws1/tu_zxofv28-my_workspace/")
-        for folder in dir.iterdir():
+        for folder in BASE_PATH.iterdir():
             if folder.is_dir():
                 for subfolder in folder.iterdir():
                     if subfolder.is_dir() and any(file.suffix == ".xyz" for file in folder.iterdir()):
