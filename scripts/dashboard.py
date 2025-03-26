@@ -14,14 +14,14 @@ import cProfile
 import pstats
 import numpy as np
 import asyncio
-from database import Database
+from cache import FileCache
 
 BASE_PATH = Path(Path(__file__).resolve().parent.parent / "calculations")
 if not BASE_PATH.exists():
     BASE_PATH.mkdir(parents=True, exist_ok=True)
 open_topic = ""
 state = 0
-file_cache ={}
+file_cache = FileCache()
 
 def profile(func):
     def wrapper(*args, **kwargs):
@@ -144,15 +144,11 @@ class Dashboard:
     end""")
         if st.button("Berechnung starten"):
             if file_paths:
-                st.info("Die Berechnung wurde in Auftrag gegeben...")
-                async def process_file(file_path):
-                    pipeline.ORCAInputFileCreator(str(file_path), header_input).create_inp_files(file_cache)
-
-                async def process_all_files():
-                    tasks = [process_file(file_path) for file_path in file_paths]
-                    await asyncio.gather(*tasks)
-
-                asyncio.run(process_all_files())
+                st.info("Die Berechnung wird in Auftrag gegeben...")
+                for file_path in file_paths:
+                    pipeline.ORCAInputFileCreator(str(file_path), file_cache, header_input).create_inp_files()
+                    file_cache.commit()
+                file_cache.clear()
                 st.success("Die Berechnung wurde vorbereitet.")
             else:
                 st.error("Bitte wählen Sie eine Datei aus.")

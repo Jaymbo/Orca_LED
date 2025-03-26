@@ -27,20 +27,15 @@ class Database:
         self.header_filename = self.dir / f"{self.dir.stem}.inp"
 
     def get_filecontent(self) -> str:
-        if self.filename not in self.file_cache:
-            with self.filename.open("r") as f:
-                self.file_cache[self.filename] = f.read()
-        return self.file_cache[self.filename]
+        return self.file_cache.get(self.filename)
 
     def atoms_from_filecontent(self, content: str) -> list:
         lines = [line for line in content.splitlines() if line.strip()]
         return [line.split()[0] for line in lines[2:]]
 
     def header_from_file(self) -> str:
-        if self.header_filename not in self.file_cache:
-            with self.header_filename.open("r") as f:
-                self.file_cache[self.header_filename] = "".join(line.strip() for line in f)
-        return self.file_cache[self.header_filename]
+        content = self.file_cache.get(self.header_filename)
+        return "".join(line.strip() for line in content.splitlines())
 
     def atoms_to_str(self, atoms: list) -> str:
         sorted_atoms = sorted(atom.upper() for atom in atoms)
@@ -100,7 +95,6 @@ class Database:
         D1 = self.compute_distance_matrix(coords1)
         D2 = self.compute_distance_matrix(coords2)
         row_ind, col_ind, _ = self.match_distance_matrices(D1, D2)
-        # logging.info("Row indices: %s, Column indices: %s", row_ind, col_ind)
         return self.rmsd_of_distance_matrices(D1, D2, row_ind, col_ind), col_ind
 
     def right_fragmentation(self, header_str, col_ind):
@@ -128,21 +122,14 @@ class Database:
         header_header = "".join(char for char in header_str.split("*XYZfile")[0].strip() if char.isalnum())
         def check_header(folder):
             xyz_path = self.base / folder / f"{folder}.inp"
-            if xyz_path not in self.file_cache:
-                with xyz_path.open("r") as f:
-                    self.file_cache[xyz_path] = "".join(line.strip() for line in f)
-            content = self.file_cache[xyz_path]
+            content = "".join(line.strip() for line in self.file_cache.get(xyz_path).splitlines())
             output = "".join(char for char in content.split("*XYZfile")[0].strip() if char.isalnum())
-            print(output)
             return output == header_header
 
         def compute_rmsd_and_col(folder):
             xyz_path = self.base / folder / f"{folder}.xyz"
-            if xyz_path not in self.file_cache:
-                with xyz_path.open("r") as f:
-                    self.file_cache[xyz_path] = f.read()
-            content = self.file_cache[xyz_path]
-            return self.rmsd(candidate_xyz, content)
+            xyz_content = self.file_cache.get(xyz_path)
+            return self.rmsd(candidate_xyz, xyz_content)
         matched = [folder for folder in matched if check_header(folder)]
         if not matched:
             return matched, False
@@ -152,11 +139,8 @@ class Database:
 
         def check_fragmentation(folder, col):
             inp_path = self.base / folder / f"{folder}.inp"
-            if inp_path not in self.file_cache:
-                with inp_path.open("r") as f:
-                    self.file_cache[inp_path] = f.read()
-            content = self.file_cache[inp_path]
-            return self.right_fragmentation(content, col) == fragments
+            inp_content = self.file_cache.get(inp_path)
+            return self.right_fragmentation(inp_content, col) == fragments
 
         fragmentation_matches = np.array([check_fragmentation(folder, col) for folder, col in zip(matched, col_ind)])
 
@@ -176,19 +160,15 @@ class Database:
         xyz_path = filepath.with_suffix(".xyz")
         for end in self.ends:
             out_path = Path(str(filepath) + end)
-            with os.fdopen(os.open(out_path, os.O_WRONLY | os.O_CREAT, 0o644), 'w') as file:
-                file.write("test")
-        self.header_filename.unlink()
-        copy2(self.filename, xyz_path)
+            self.file_cache.set(out_path, "test")
+        self.file_cache.set(xyz_path, self.file_cache.get(self.filename))
         self.create_symlink(xyz_path)
 
     def create_symlink(self, out_path: Path) -> None:
         symlink_base = self.header_filename.parent / self.header_filename.stem
         for end in self.ends:
             symlink = Path(f"{symlink_base}{end}")
-            if symlink.exists():
-                symlink.unlink()
-            symlink.symlink_to(Path(f"{out_path.parent}/{out_path.stem}{end}"))
+            self.file_cache.link(out_path, symlink)
 
     def file_end(self, filename: Path) -> str:
         for match in self.ends:
@@ -218,10 +198,8 @@ class Database:
             return None
 
     def add_calculation(self):
-        start_time = time.time()
         candidate_xyz = self.get_filecontent()
         atoms = self.atoms_from_filecontent(candidate_xyz)
-        header = self.header_from_file()
         new_dir, new_filepath = self.create_filename(atoms)
         new_dir.mkdir(parents=True, exist_ok=True)
 
@@ -240,12 +218,7 @@ class Database:
         destination = destination.with_suffix(".inp")
         copy2(self.header_filename, destination)
 
-        end_time = time.time()
-        logging.info("Calculation files copied to database folder: %s", new_dir)
-        logging.info("Time taken to add calculation: %.2f seconds", end_time - start_time)
-
     def cleanup(self):
-        start_time = time.time()
         database_names = self.get_database_names()
         for folder in self.base.iterdir():
             try:
@@ -254,10 +227,8 @@ class Database:
                     xyz_files = [self.base / m / f"{m}.xyz" for m in matched if (self.base / m / f"{m}.xyz").exists()]
                     if not (xyz_files[0].exists() and xyz_files[1].exists()):
                         continue
-                    with xyz_files[0].open("r") as f:
-                        content0 = f.read()
-                    with xyz_files[1].open("r") as f:
-                        content1 = f.read()
+                    content0 = self.file_cache.get(xyz_files[0])
+                    content1 = self.file_cache.get(xyz_files[1])
                     current_rmsd = self.rmsd(content0, content1)
                     if current_rmsd < self.rmsd_value:
                         self.syslink_merge(xyz_files[0], xyz_files[1])
@@ -267,8 +238,6 @@ class Database:
                         rm.rmdir()
             except Exception as e:
                 logging.error("Error in folder %s: %s", folder.name, e)
-        end_time = time.time()
-        logging.info("Time taken to clean up: %.2f seconds", end_time - start_time)
 
     def syslink_merge(self, original: Path, merged: Path):
         for folder in BASE_PATH.iterdir():
@@ -281,12 +250,9 @@ class Database:
                                 file.symlink_to(merged)
 
     def copy_to_db(self):
-        start_time = time.time()
         for folder in BASE_PATH.iterdir():
             if folder.is_dir():
                 for subfolder in folder.iterdir():
                     if subfolder.is_dir() and any(file.suffix == ".xyz" for file in folder.iterdir()):
                         Database(subfolder).add_calculation()
         self.cleanup()
-        end_time = time.time()
-        logging.info("Time taken to copy to database: %.2f seconds", end_time - start_time)
