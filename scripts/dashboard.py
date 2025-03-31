@@ -94,8 +94,9 @@ class Dashboard:
                         clean_name = uploaded_file.name.translate(str.maketrans(" ", "_", "!$%&()=+,-/:;<=>?@[\]^`{|}~"))
                         save_path = BASE_PATH / f"{topic}/{Path(clean_name).stem}/{clean_name}"
                         save_path.parent.mkdir(parents=True, exist_ok=True)
-                        save_path.write_bytes(uploaded_file.getbuffer())
-                        logging.info(f"File uploaded: {uploaded_file.name} with topic: {topic}")
+                        if not save_path.exists():
+                            save_path.write_bytes(uploaded_file.getbuffer())
+                            logging.info(f"File uploaded: {uploaded_file.name} with topic: {topic}")
                         return save_path
                     except Exception as e:
                         logging.error(f"Upload failed: {str(e)}")
@@ -129,30 +130,27 @@ class Dashboard:
 
                     else:
                         topic = chose_topic()
-                        file_paths.append(FileHandler.handle_file_upload(topic, f))
-                Dashboard.Visualizer.visualize_xyz(file_paths)
+                        if topic != "Neues Topic erstellen":
+                            file_paths.append(FileHandler.handle_file_upload(topic, f))
+                
+                if topic != "Neues Topic erstellen":
+                    Dashboard.Visualizer.visualize_xyz(file_paths)
             return file_paths
     
         st.title("Neue Berechnung starten")
         file_paths = upload_file()
-        header_input = st.text_area("Zusätzliche Header-Einstellungen für die .inp-Datei (optional)", """! DLPNO-CCSD(T) def2-svp def2-svp/C DEF2/J RIJCOSX tightSCF normalPNO LED
+        header_input = st.text_area("Zusätzliche Header-Einstellungen für die .inp-Datei (optional)", """! DLPNO-CCSD(T) def2-tzvpp def2-tzvpp/C DEF2/J RIJCOSX tightSCF normalPNO LED
 
     %maxcore 160000
 
     %mdci
-        MaxIter 200
+        MaxIter 999
     end""")
         if st.button("Berechnung starten"):
             if file_paths:
-                st.info("Die Berechnung wurde in Auftrag gegeben...")
-                async def process_file(file_path):
+                st.info("Die Berechnung wird in Auftrag gegeben...")
+                for file_path in file_paths:
                     pipeline.ORCAInputFileCreator(str(file_path), header_input).create_inp_files(file_cache)
-
-                async def process_all_files():
-                    tasks = [process_file(file_path) for file_path in file_paths]
-                    await asyncio.gather(*tasks)
-
-                asyncio.run(process_all_files())
                 st.success("Die Berechnung wurde vorbereitet.")
             else:
                 st.error("Bitte wählen Sie eine Datei aus.")

@@ -13,6 +13,7 @@ from rdkit.Chem.rdmolops import GetFormalCharge, GetMolFrags
 from rdkit.Chem.rdmolfiles import MolToXYZBlock
 from rdkit import Chem
 import numpy as np
+import math
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -91,6 +92,9 @@ end"""
         self.xyz_folder: str = os.path.dirname(self.xyz_file)
         os.makedirs(self.xyz_folder, exist_ok=True)
         self.frag_len: list[int] = []
+        self.mem: list[int] = []
+        self.nprocs: list[int] = []
+        self.scratch: list[int] = []
 
     def create_inp_file_content(self, charge: int, npros: int, xyz_file: str, fragment_lines: list[str]) -> str:
         inp_content = f"{self.header}{npros}\nend\n*XYZfile {charge} 1 {xyz_file}\n\n"
@@ -133,11 +137,11 @@ end"""
             return
         for i, xyz_file_i in enumerate(xyz_files):
             mol = self.mols[xyz_file_i]
-            self.create_single_inp_file(mol, xyz_file_i, Path(xyz_file_i).parent, self.frag_len[i], fragment_lines[i])
+            self.create_single_inp_file(mol, xyz_file_i, Path(xyz_file_i).parent, self.nprocs[i], fragment_lines[i])
             path = Database.process_candidate(Path(xyz_file_i.split(".")[0]), file_cache)
             if path:
-                self.create_single_inp_file(mol, path, Path(path).parents[1], self.frag_len[i], fragment_lines[i])
-                sh_path = ShellScriptCreator.single_sh_script_erstellen(path, Path(path).parents[1], i, self.frag_len[i])
+                self.create_single_inp_file(mol, path, Path(path).parents[1], self.nprocs[i], fragment_lines[i])
+                sh_path = ShellScriptCreator.single_sh_script_erstellen(path, Path(path).parents[1], i, self.nprocs[i], self.frag_len[i], self.mem[i])
                 # subprocess.run(["sbatch", sh_path])
 
     def handle_fragments(self) -> list[str]:
@@ -197,10 +201,10 @@ end"""
         fragment_lines.append(" end\nend\n")
         return fragment_lines
 
-    def create_single_inp_file(self, mol, xyz_file_i: str, base: Path, frag_len: int, fragment_line: str) -> Path:
+    def create_single_inp_file(self, mol, xyz_file_i: str, base: Path, npros: int, fragment_line: str) -> Path:
         logging.info(f"Creating single ORCA input file for: {xyz_file_i}")
         charge = mol.get_charge()
-        inp_content = self.create_inp_file_content(charge, frag_len, xyz_file_i, fragment_line)
+        inp_content = self.create_inp_file_content(charge, npros, xyz_file_i, fragment_line)
         base_name = os.path.splitext(os.path.basename(xyz_file_i))[0]
         base_path = base / base_name
         inp_path = base_path / f"{base_name}.inp"
@@ -212,17 +216,42 @@ end"""
         return inp_path
 
     def calculate_frag_len(self, subsys_groups: list[list]) -> None:
+        npros_options = [48, 24, 12, 8, 6, 4, 2, 1]
+        mem_options = [180, 370, 750, 1500]
+
         for fragments_group in subsys_groups:
-            self.frag_len.append(min(sum(len(group) for group in fragments_group), 48))
+            frag_len = sum(len(group) for group in fragments_group)
+            self.frag_len.append(frag_len)
+
+            best_mem = None
+            best_nprocs = None
+            found = False
+            for nprocs in npros_options:
+                if found:
+                    break
+                for mem in mem_options:
+                    estimated_mem = frag_len * nprocs * 0.6
+                    mem_diff = mem - estimated_mem
+                    # print(f"frag_len: {frag_len}, nprocs: {nprocs}, mem: {mem}, estimated_mem: {estimated_mem}, mem_diff: {mem_diff}")
+                    if 0 <= mem_diff:
+                        found = True
+                        best_mem = mem
+                        best_nprocs = nprocs
+                        break	
+            if not found:
+                logging.warning(f"No suitable memory/nprocs found for frag_len {frag_len}. Using max memory and min nprocs.")
+            self.mem.append(best_mem or mem_options[-1])  # Fallback to max memory if no match
+            self.nprocs.append(best_nprocs or npros_options[-1])  # Fallback to min nprocs if no match
 
 class ShellScriptCreator:
-    def __init__(self, mem: int, nprocs: int, time: str, path: str, name: str, base: Path):
+    def __init__(self, mem: int, nprocs: int, time: str, path: str, name: str, base: Path) -> None:
         self.mem = mem
         self.nprocs = nprocs
         self.time = time
         self.path = path.split(".")[0]
         self.name = name
         self.base = base
+        self.scratch = 6000 if self.mem == 1500 else 2900 if self.mem == 750 else 0
 
     @track_time
     def create_sh_script_content(self) -> str:
@@ -231,6 +260,7 @@ class ShellScriptCreator:
 #SBATCH --mem={self.mem}gb
 #SBATCH --ntasks-per-node={self.nprocs}
 #SBATCH --time={self.time}
+{f"#SBATCH --gres=scratch:{self.scratch}" if self.scratch != 0 else ""}
 #SBATCH --output={self.path}_out.out
 #SBATCH --error={self.path}_err.err
 
@@ -243,18 +273,20 @@ echo $name
 module load chem/orca/6.0.1
 module load mpi/openmpi/4.1
 module list
-
+{'cp $workspace_directory/$name/$name.inp $SCRATCH' if self.scratch != 0 else ''}
+{'cd $SCRATCH' if self.scratch != 0 else ''}
 echo "ausführen"
-$orca $workspace_directory/$name/$name.inp > $workspace_directory/$name/$name.out
+$orca {'$workspace_directory/$name/$name.inp' if self.scratch == 0 else '$SCRATCH/$name.inp'} > $workspace_directory/$name/$name.out
+{'cp $SCRATCH/* $workspace_directory/$name' if self.scratch != 0 else ''}
 """
         return script_content
 
     @staticmethod
-    def single_sh_script_erstellen(path: str, base: Path, i: int, frag_len: int, time: str = "20:00:00", mem: int = 720) -> Path:
+    def single_sh_script_erstellen(path: str, base: Path, i: int, npros: int, frag_len: int, mem: int) -> Path:
         name = Path(path).stem
         total_path = base / f"{name}/{name}.sh"
         script_content = ShellScriptCreator(
-            int(mem * frag_len / 48), frag_len, time, path, name, base
+            mem, npros, f"{math.floor(0.12*frag_len)}:{int((0.12*frag_len * 60) % 60):02}:00", path, name, base
         ).create_sh_script_content()
         with open(total_path, "w") as file:
             file.write(script_content)
